@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getAllUsers, getUserById, changePassword, getShiftsByMonth } from '../services/dataService';
+import { getAllUsers, getUserById, changePassword, getShiftsByMonth, addPointsToUser } from '../services/dataService';
 import ShiftSchedule from './ShiftSchedule';
 import LoadingSpinner from './LoadingSpinner';
 
@@ -19,6 +19,10 @@ export default function Employees({ currentUserId }) {
   const [oldPassword, setOldPassword] = useState('');
   const [newPassword, setNewPassword] = useState('');
   const [workingNow, setWorkingNow] = useState([]);
+  const [showPointsModal, setShowPointsModal] = useState(false);
+  const [selectedUserForPoints, setSelectedUserForPoints] = useState(null);
+  const [pointsAmount, setPointsAmount] = useState('');
+  const [pointsReason, setPointsReason] = useState('');
 
   const loadData = async () => {
     setLoading(true);
@@ -27,7 +31,6 @@ export default function Employees({ currentUserId }) {
         getAllUsers(),
         getUserById(currentUserId)
       ]);
-      // Исключаем администраторов из списка сотрудников (не показываем их в таблице)
       const filteredUsers = allUsers.filter(u => u.role !== 'admin');
       setUsers(filteredUsers);
       setCurrentUser(user);
@@ -39,7 +42,6 @@ export default function Employees({ currentUserId }) {
       shiftsData.forEach(s => { shiftsMap[`${s.userId}_${s.date}`] = s.value; });
       setCurrentShifts(shiftsMap);
 
-      // Определяем работающих сейчас (Новосибирск)
       const novosibirskTime = new Date(new Date().toLocaleString('en-US', { timeZone: 'Asia/Novosibirsk' }));
       const today = novosibirskTime.toISOString().split('T')[0];
       const currentHour = novosibirskTime.getHours();
@@ -102,6 +104,20 @@ export default function Employees({ currentUserId }) {
     return 8000;
   };
 
+  const canAwardPoints = currentUser && (currentUser.role === 'admin' || currentUser.role === 'manager' || currentUser.isIT === true);
+
+  const handleAddPoints = async () => {
+    if (!pointsAmount || !pointsReason) {
+      alert('Заполните количество и причину');
+      return;
+    }
+    await addPointsToUser(currentUser.id, selectedUserForPoints.id, parseInt(pointsAmount), pointsReason);
+    setShowPointsModal(false);
+    setPointsAmount('');
+    setPointsReason('');
+    loadData();
+  };
+
   if (loading) return <LoadingSpinner />;
 
   return (
@@ -127,7 +143,7 @@ export default function Employees({ currentUserId }) {
         <table style={{ width: '100%' }}>
           <thead>
             <tr>
-              <th>ФИО</th><th>Отдел</th><th>Баллы</th><th>Стаж (лет)</th><th>KPI (день)</th>
+              <th>ФИО</th><th>Отдел</th><th>Баллы</th><th>Стаж (лет)</th><th>KPI (день)</th><th>Действия</th>
             </tr>
           </thead>
           <tbody>
@@ -138,6 +154,11 @@ export default function Employees({ currentUserId }) {
                 <td>{u.points || 0}</td>
                 <td>{u.seniorityStartDate ? Math.floor((new Date() - new Date(u.seniorityStartDate)) / (1000 * 60 * 60 * 24 * 365)) : 0}</td>
                 <td>{u.kpi?.day?.calls || 0}/{u.kpi?.day?.sales || 0}/{u.kpi?.day?.rating || 0}</td>
+                <td>
+                  {canAwardPoints && (
+                    <button className="secondary" onClick={() => { setSelectedUserForPoints(u); setShowPointsModal(true); }}>🎁</button>
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>
@@ -163,6 +184,20 @@ export default function Employees({ currentUserId }) {
             <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
               <button className="primary" onClick={handleChangePassword}>Сохранить</button>
               <button className="secondary" onClick={() => setShowChangePassword(false)}>Отмена</button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {showPointsModal && selectedUserForPoints && (
+        <div className="modal-overlay">
+          <div className="modal-content">
+            <h3>Начисление баллов {selectedUserForPoints.fullName}</h3>
+            <input type="number" placeholder="Количество баллов" value={pointsAmount} onChange={e => setPointsAmount(e.target.value)} />
+            <input type="text" placeholder="Причина" value={pointsReason} onChange={e => setPointsReason(e.target.value)} />
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+              <button className="primary" onClick={handleAddPoints}>Начислить</button>
+              <button className="secondary" onClick={() => setShowPointsModal(false)}>Отмена</button>
             </div>
           </div>
         </div>

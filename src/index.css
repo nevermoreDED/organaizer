@@ -376,7 +376,7 @@ body.light-theme .fc .fc-daygrid-event {
   z-index: 1000;
 }
 .modal-content {
-  background: rgba(17, 21, 30, 0.95);
+  background: rgba(170, 21, 130, 0.95);
   backdrop-filter: blur(16px);
   border: 1px solid var(--glass-border);
   border-radius: var(--radius-lg);

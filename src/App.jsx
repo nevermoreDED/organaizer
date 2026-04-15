@@ -10,6 +10,7 @@ import Logistics from './components/Logistics';
 import Booking from './components/Booking';
 import Employees from './components/Employees';
 import Development from './components/Development';
+import Reports from './components/Reports';
 import AdminPanel from './components/AdminPanel';
 import './index.css';
 
@@ -37,7 +38,6 @@ function App() {
     return <Login onLogin={setCurrentUser} />;
   }
 
-  // Админ – если роль admin или флаг isIT (независимо от роли)
   const isAdmin = currentUser.role === 'admin' || currentUser.isIT === true;
 
   const toggleTheme = () => {
@@ -88,6 +88,7 @@ function App() {
             <button className={`nav-button ${mainTab === 'booking' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('booking')}>Бронирование</button>
             <button className={`nav-button ${mainTab === 'employees' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('employees')}>Сотрудники</button>
             <button className={`nav-button ${mainTab === 'development' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('development')}>Развитие</button>
+            <button className={`nav-button ${mainTab === 'reports' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('reports')}>Отчёты</button>
             {isAdmin && <button className="danger" onClick={() => setShowAdmin(true)}>👑 Админ-панель</button>}
             <button className="secondary" onClick={() => setCurrentUser(null)}>Выйти</button>
           </div>
@@ -108,6 +109,7 @@ function App() {
         {mainTab === 'booking' && <Booking userId={currentUser.id} />}
         {mainTab === 'employees' && <Employees currentUserId={currentUser.id} />}
         {mainTab === 'development' && <Development userId={currentUser.id} departmentId={currentUser.departmentId} />}
+        {mainTab === 'reports' && <Reports userId={currentUser.id} isAdmin={isAdmin} />}
         {showAdmin && <AdminPanel currentUser={currentUser} onClose={() => setShowAdmin(false)} />}
       </div>
     </>

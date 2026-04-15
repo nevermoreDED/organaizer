@@ -173,7 +173,7 @@ export const getAttentionBlock = async (userId, departmentId) => {
   return { overdueTasks, todayTasks, overdueAssignments, todayAssignments };
 };
 
-// ===================== ЛОГИСТИКА: ИСПОЛНИТЕЛИ (полные данные) =====================
+// ===================== ЛОГИСТИКА: ИСПОЛНИТЕЛИ =====================
 export const getDrivers = async (userId) => {
   const q = query(collection(db, 'logistics_drivers'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
@@ -202,7 +202,6 @@ export const deleteDriver = async (id) => {
   await deleteDoc(doc(db, 'logistics_drivers', id));
 };
 
-// ===================== ЛОГИСТИКА: ЗАКАЗЧИКИ (только имя и контакты) =====================
 export const getCustomers = async (userId) => {
   const q = query(collection(db, 'logistics_customers'), where('userId', '==', userId));
   const snapshot = await getDocs(q);
@@ -217,10 +216,6 @@ export const addCustomer = async (userId, customerData) => {
     createdAt: Timestamp.now()
   });
   return { id: docRef.id, ...customerData };
-};
-
-export const updateCustomer = async (id, changes) => {
-  await updateDoc(doc(db, 'logistics_customers', id), changes);
 };
 
 export const deleteCustomer = async (id) => {
@@ -489,6 +484,9 @@ export const createUser = async (userData) => {
   const docRef = await addDoc(collection(db, 'users'), {
     ...userData,
     isIT: userData.isIT || false,
+    points: userData.points || 0,
+    pointsHistory: userData.pointsHistory || [],
+    kpi: userData.kpi || { day: { calls: 0, sales: 0, rating: 0 }, week: { calls: 0, sales: 0, rating: 0 }, month: { calls: 0, sales: 0, rating: 0 } },
     createdAt: Timestamp.now()
   });
   return { id: docRef.id, ...userData };
@@ -507,6 +505,82 @@ export const changePassword = async (userId, oldPassword, newPassword, isAdmin =
   if (!user) throw new Error('Пользователь не найден');
   if (!isAdmin && user.password !== oldPassword) throw new Error('Неверный старый пароль');
   await updateUser(userId, { password: newPassword });
+};
+
+// ===================== ПРОГРЕССИКИ (НАЧИСЛЕНИЕ БАЛЛОВ) =====================
+export const addPointsToUser = async (fromUserId, toUserId, amount, reason) => {
+  const user = await getUserById(toUserId);
+  const newPoints = (user.points || 0) + amount;
+  const historyItem = { amount, reason, date: new Date().toISOString(), fromUserId };
+  const newHistory = [...(user.pointsHistory || []), historyItem];
+  await updateUser(toUserId, { points: newPoints, pointsHistory: newHistory });
+};
+
+// ===================== ОТЧЁТЫ (KPI) =====================
+export const saveReport = async (userId, report) => {
+  const docRef = await addDoc(collection(db, 'reports'), {
+    userId,
+    date: report.date,
+    calls: report.calls || 0,
+    sales: report.sales || 0,
+    rating: report.rating || 0,
+    createdAt: Timestamp.now()
+  });
+  await updateUserKPI(userId);
+  return { id: docRef.id, ...report };
+};
+
+export const getReports = async (userId, startDate, endDate) => {
+  let q = query(collection(db, 'reports'), where('userId', '==', userId));
+  if (startDate) q = query(q, where('date', '>=', startDate));
+  if (endDate) q = query(q, where('date', '<=', endDate));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+export const getAllReports = async (startDate, endDate) => {
+  let q = collection(db, 'reports');
+  if (startDate) q = query(q, where('date', '>=', startDate));
+  if (endDate) q = query(q, where('date', '<=', endDate));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+export const updateUserKPI = async (userId) => {
+  const reports = await getReports(userId, null, null);
+  const today = new Date().toISOString().split('T')[0];
+  const weekAgo = new Date();
+  weekAgo.setDate(weekAgo.getDate() - 7);
+  const weekAgoStr = weekAgo.toISOString().split('T')[0];
+  const monthAgo = new Date();
+  monthAgo.setMonth(monthAgo.getMonth() - 1);
+  const monthAgoStr = monthAgo.toISOString().split('T')[0];
+
+  const dayReports = reports.filter(r => r.date === today);
+  const weekReports = reports.filter(r => r.date >= weekAgoStr);
+  const monthReports = reports.filter(r => r.date >= monthAgoStr);
+
+  const sum = (arr, key) => arr.reduce((acc, r) => acc + (r[key] || 0), 0);
+  const avg = (arr, key) => arr.length ? sum(arr, key) / arr.length : 0;
+
+  const kpi = {
+    day: {
+      calls: sum(dayReports, 'calls'),
+      sales: sum(dayReports, 'sales'),
+      rating: avg(dayReports, 'rating')
+    },
+    week: {
+      calls: sum(weekReports, 'calls'),
+      sales: sum(weekReports, 'sales'),
+      rating: avg(weekReports, 'rating')
+    },
+    month: {
+      calls: sum(monthReports, 'calls'),
+      sales: sum(monthReports, 'sales'),
+      rating: avg(monthReports, 'rating')
+    }
+  };
+  await updateUser(userId, { kpi });
 };
 
 // ===================== БРОНИРОВАНИЕ: ЧЕК-ЛИСТЫ =====================
