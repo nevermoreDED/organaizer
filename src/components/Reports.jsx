@@ -1,9 +1,16 @@
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { saveReport, getReports, getAllReports, getUserById } from '../services/dataService';
+import { saveReport, getReports, getAllReports, getUserById, getUsersByDepartment } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
-export default function Reports({ userId, isAdmin }) {
+const departments = [
+  { id: 'dept1', name: 'Логистика' },
+  { id: 'dept3', name: 'Бухгалтерия' },
+  { id: 'dept4', name: 'Бронирование' },
+  { id: 'dept5', name: 'Качество' }
+];
+
+export default function Reports({ userId, currentUserRole, currentUserDepartmentId }) {
   const [currentUser, setCurrentUser] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [allowDateEdit, setAllowDateEdit] = useState(false);
@@ -21,9 +28,9 @@ export default function Reports({ userId, isAdmin }) {
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
   const [usersCache, setUsersCache] = useState({});
-  const [loading, setLoading] = useState(false);
+  const [loadingMy, setLoadingMy] = useState(false);
+  const [loadingAll, setLoadingAll] = useState(false);
 
-  // Загрузка текущего пользователя для отображения имени и отдела
   useEffect(() => {
     const loadUser = async () => {
       const user = await getUserById(userId);
@@ -33,31 +40,52 @@ export default function Reports({ userId, isAdmin }) {
   }, [userId]);
 
   const loadMyReports = async () => {
-    setLoading(true);
-    const reports = await getReports(userId, filterStart || null, filterEnd || null);
-    setMyReports(reports);
-    setLoading(false);
+    setLoadingMy(true);
+    try {
+      const reports = await getReports(userId, filterStart || null, filterEnd || null);
+      setMyReports(reports);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingMy(false);
+    }
   };
 
   const loadAllReports = async () => {
-    if (!isAdmin) return;
-    setLoading(true);
-    const reports = await getAllReports(filterStart || null, filterEnd || null);
-    const usersMap = {};
-    for (const report of reports) {
-      if (!usersMap[report.userId]) {
-        const user = await getUserById(report.userId);
-        usersMap[report.userId] = user?.fullName || report.userId;
+    if (!(currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it')) return;
+    setLoadingAll(true);
+    try {
+      let reports;
+      if (currentUserRole === 'admin' || currentUserRole === 'it') {
+        reports = await getAllReports(filterStart || null, filterEnd || null);
+      } else {
+        // Руководитель отдела
+        const all = await getAllReports(filterStart || null, filterEnd || null);
+        const deptUsers = await getUsersByDepartment(currentUserDepartmentId);
+        const userIds = deptUsers.map(u => u.id);
+        reports = all.filter(r => userIds.includes(r.userId));
       }
+      const usersMap = {};
+      for (const report of reports) {
+        if (!usersMap[report.userId]) {
+          const user = await getUserById(report.userId);
+          usersMap[report.userId] = user?.fullName || report.userId;
+        }
+      }
+      setUsersCache(usersMap);
+      setAllReports(reports);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoadingAll(false);
     }
-    setUsersCache(usersMap);
-    setAllReports(reports);
-    setLoading(false);
   };
 
   useEffect(() => {
     loadMyReports();
-    if (isAdmin) loadAllReports();
+    if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it') {
+      loadAllReports();
+    }
   }, [filterStart, filterEnd]);
 
   const handleSubmit = async (e) => {
@@ -76,9 +104,9 @@ export default function Reports({ userId, isAdmin }) {
       closed: parseInt(closed),
       foundDriver: foundDriver ? parseInt(foundDriver) : 0,
       notFoundDriver: notFoundDriver ? parseInt(notFoundDriver) : 0,
-      comment
+      comment,
+      departmentName: departments.find(d => d.id === currentUser?.departmentId)?.name || currentUser?.departmentId || ''
     });
-    // Очистка формы
     setOrders('');
     setRequests('');
     setTransferred('');
@@ -91,14 +119,16 @@ export default function Reports({ userId, isAdmin }) {
     setAllowDateEdit(false);
     setDate(new Date().toISOString().split('T')[0]);
     loadMyReports();
-    if (isAdmin) loadAllReports();
+    if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it') {
+      loadAllReports();
+    }
     alert('Отчёт сохранён');
   };
 
   const exportToExcel = () => {
     const data = allReports.map(r => ({
       'Сотрудник': usersCache[r.userId] || r.userId,
-      'Отдел': r.department || '',
+      'Отдел': r.departmentName || '',
       'Дата': r.date,
       'Заказы': r.orders,
       'Запросы': r.requests,
@@ -116,7 +146,9 @@ export default function Reports({ userId, isAdmin }) {
     XLSX.writeFile(wb, `reports_${filterStart || 'all'}_${filterEnd || 'all'}.xlsx`);
   };
 
-  if (loading) return <LoadingSpinner />;
+  const canViewAllReports = currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it';
+
+  if (loadingMy && myReports.length === 0) return <LoadingSpinner />;
 
   return (
     <div className="card">
@@ -124,7 +156,7 @@ export default function Reports({ userId, isAdmin }) {
       <form onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 10 }}>
           <div><strong>Сотрудник:</strong> {currentUser?.fullName || 'Загрузка...'}</div>
-          <div><strong>Отдел:</strong> {currentUser?.departmentId || '—'}</div>
+          <div><strong>Отдел:</strong> {departments.find(d => d.id === currentUser?.departmentId)?.name || currentUser?.departmentId || '—'}</div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 15 }}>
           <label>
@@ -152,9 +184,11 @@ export default function Reports({ userId, isAdmin }) {
       </form>
 
       <div style={{ marginBottom: 15, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
+        <label>Фильтр по дате:</label>
         <input type="date" value={filterStart} onChange={e => setFilterStart(e.target.value)} placeholder="с" />
+        <span>—</span>
         <input type="date" value={filterEnd} onChange={e => setFilterEnd(e.target.value)} placeholder="по" />
-        {isAdmin && <button className="secondary" onClick={exportToExcel}>📎 Экспорт в Excel</button>}
+        {canViewAllReports && <button className="secondary" onClick={exportToExcel}>📎 Экспорт в Excel</button>}
       </div>
 
       <h3>Мои отчёты</h3>
@@ -184,7 +218,7 @@ export default function Reports({ userId, isAdmin }) {
         </table>
       </div>
 
-      {isAdmin && (
+      {canViewAllReports && (
         <>
           <h3>Все отчёты</h3>
           <div style={{ overflowX: 'auto' }}>
@@ -198,7 +232,7 @@ export default function Reports({ userId, isAdmin }) {
                 {allReports.map(r => (
                   <tr key={r.id}>
                     <td>{usersCache[r.userId] || r.userId}</td>
-                    <td>{r.department || ''}</td>
+                    <td>{r.departmentName || ''}</td>
                     <td>{r.date}</td>
                     <td>{r.orders}</td>
                     <td>{r.requests}</td>

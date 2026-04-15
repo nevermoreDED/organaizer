@@ -480,6 +480,12 @@ export const getUserById = async (userId) => {
   return { id: snap.id, ...snap.data() };
 };
 
+export const getUsersByDepartment = async (departmentId) => {
+  const q = query(collection(db, 'users'), where('departmentId', '==', departmentId));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
 export const createUser = async (userData) => {
   const docRef = await addDoc(collection(db, 'users'), {
     ...userData,
@@ -517,25 +523,6 @@ export const addPointsToUser = async (fromUserId, toUserId, amount, reason) => {
 };
 
 // ===================== ОТЧЁТЫ (KPI) =====================
-export const saveReport = async (userId, report) => {
-  const docRef = await addDoc(collection(db, 'reports'), {
-    userId,
-    date: report.date,
-    orders: report.orders || 0,
-    requests: report.requests || 0,
-    transferred: report.transferred || 0,
-    calls: report.calls || 0,
-    incoming: report.incoming || 0,
-    closed: report.closed || 0,
-    foundDriver: report.foundDriver || 0,
-    notFoundDriver: report.notFoundDriver || 0,
-    comment: report.comment || '',
-    createdAt: Timestamp.now()
-  });
-  await updateUserKPI(userId);
-  return { id: docRef.id, ...report };
-};
-
 export const getReports = async (userId, startDate, endDate) => {
   let q = query(collection(db, 'reports'), where('userId', '==', userId));
   if (startDate) q = query(q, where('date', '>=', startDate));
@@ -552,41 +539,23 @@ export const getAllReports = async (startDate, endDate) => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
-export const updateUserKPI = async (userId) => {
-  const reports = await getReports(userId, null, null);
-  const today = new Date().toISOString().split('T')[0];
-  const weekAgo = new Date();
-  weekAgo.setDate(weekAgo.getDate() - 7);
-  const weekAgoStr = weekAgo.toISOString().split('T')[0];
-  const monthAgo = new Date();
-  monthAgo.setMonth(monthAgo.getMonth() - 1);
-  const monthAgoStr = monthAgo.toISOString().split('T')[0];
-
-  const dayReports = reports.filter(r => r.date === today);
-  const weekReports = reports.filter(r => r.date >= weekAgoStr);
-  const monthReports = reports.filter(r => r.date >= monthAgoStr);
-
-  const sum = (arr, key) => arr.reduce((acc, r) => acc + (r[key] || 0), 0);
-  const avg = (arr, key) => arr.length ? sum(arr, key) / arr.length : 0;
-
-  const kpi = {
-    day: {
-      calls: sum(dayReports, 'calls'),
-      sales: sum(dayReports, 'sales'),
-      rating: avg(dayReports, 'rating')
-    },
-    week: {
-      calls: sum(weekReports, 'calls'),
-      sales: sum(weekReports, 'sales'),
-      rating: avg(weekReports, 'rating')
-    },
-    month: {
-      calls: sum(monthReports, 'calls'),
-      sales: sum(monthReports, 'sales'),
-      rating: avg(monthReports, 'rating')
-    }
-  };
-  await updateUser(userId, { kpi });
+export const saveReport = async (userId, report) => {
+  const docRef = await addDoc(collection(db, 'reports'), {
+    userId,
+    date: report.date,
+    orders: report.orders || 0,
+    requests: report.requests || 0,
+    transferred: report.transferred || 0,
+    calls: report.calls || 0,
+    incoming: report.incoming || 0,
+    closed: report.closed || 0,
+    foundDriver: report.foundDriver || 0,
+    notFoundDriver: report.notFoundDriver || 0,
+    comment: report.comment || '',
+    departmentName: report.departmentName || '',
+    createdAt: Timestamp.now()
+  });
+  return { id: docRef.id, ...report };
 };
 
 // ===================== БРОНИРОВАНИЕ: ЧЕК-ЛИСТЫ =====================

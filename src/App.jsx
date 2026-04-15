@@ -109,7 +109,13 @@ function App() {
         {mainTab === 'booking' && <Booking userId={currentUser.id} />}
         {mainTab === 'employees' && <Employees currentUserId={currentUser.id} />}
         {mainTab === 'development' && <Development userId={currentUser.id} departmentId={currentUser.departmentId} />}
-        {mainTab === 'reports' && <Reports userId={currentUser.id} isAdmin={isAdmin} />}
+        {mainTab === 'reports' && (
+          <Reports 
+            userId={currentUser.id} 
+            currentUserRole={currentUser.role}
+            currentUserDepartmentId={currentUser.departmentId}
+          />
+        )}
         {showAdmin && <AdminPanel currentUser={currentUser} onClose={() => setShowAdmin(false)} />}
       </div>
     </>
