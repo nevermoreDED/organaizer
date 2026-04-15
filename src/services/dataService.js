@@ -521,9 +521,15 @@ export const saveReport = async (userId, report) => {
   const docRef = await addDoc(collection(db, 'reports'), {
     userId,
     date: report.date,
+    orders: report.orders || 0,
+    requests: report.requests || 0,
+    transferred: report.transferred || 0,
     calls: report.calls || 0,
-    sales: report.sales || 0,
-    rating: report.rating || 0,
+    incoming: report.incoming || 0,
+    closed: report.closed || 0,
+    foundDriver: report.foundDriver || 0,
+    notFoundDriver: report.notFoundDriver || 0,
+    comment: report.comment || '',
     createdAt: Timestamp.now()
   });
   await updateUserKPI(userId);

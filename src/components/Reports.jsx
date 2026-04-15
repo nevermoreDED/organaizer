@@ -4,16 +4,33 @@ import { saveReport, getReports, getAllReports, getUserById } from '../services/
 import LoadingSpinner from './LoadingSpinner';
 
 export default function Reports({ userId, isAdmin }) {
+  const [currentUser, setCurrentUser] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
+  const [allowDateEdit, setAllowDateEdit] = useState(false);
+  const [orders, setOrders] = useState('');
+  const [requests, setRequests] = useState('');
+  const [transferred, setTransferred] = useState('');
   const [calls, setCalls] = useState('');
-  const [sales, setSales] = useState('');
-  const [rating, setRating] = useState('');
+  const [incoming, setIncoming] = useState('');
+  const [closed, setClosed] = useState('');
+  const [foundDriver, setFoundDriver] = useState('');
+  const [notFoundDriver, setNotFoundDriver] = useState('');
+  const [comment, setComment] = useState('');
   const [myReports, setMyReports] = useState([]);
   const [allReports, setAllReports] = useState([]);
   const [filterStart, setFilterStart] = useState('');
   const [filterEnd, setFilterEnd] = useState('');
   const [usersCache, setUsersCache] = useState({});
   const [loading, setLoading] = useState(false);
+
+  // Загрузка текущего пользователя для отображения имени и отдела
+  useEffect(() => {
+    const loadUser = async () => {
+      const user = await getUserById(userId);
+      setCurrentUser(user);
+    };
+    loadUser();
+  }, [userId]);
 
   const loadMyReports = async () => {
     setLoading(true);
@@ -45,14 +62,34 @@ export default function Reports({ userId, isAdmin }) {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
-    if (!date || !calls || !sales || !rating) {
-      alert('Заполните все поля');
+    if (!date || !orders || !requests || !transferred || !calls || !incoming || !closed) {
+      alert('Заполните все обязательные поля (Заказы, Запросы, Передано, Прозвоны, Входящие, Закрыто)');
       return;
     }
-    await saveReport(userId, { date, calls: parseInt(calls), sales: parseInt(sales), rating: parseFloat(rating) });
+    await saveReport(userId, {
+      date,
+      orders: parseInt(orders),
+      requests: parseInt(requests),
+      transferred: parseInt(transferred),
+      calls: parseInt(calls),
+      incoming: parseInt(incoming),
+      closed: parseInt(closed),
+      foundDriver: foundDriver ? parseInt(foundDriver) : 0,
+      notFoundDriver: notFoundDriver ? parseInt(notFoundDriver) : 0,
+      comment
+    });
+    // Очистка формы
+    setOrders('');
+    setRequests('');
+    setTransferred('');
     setCalls('');
-    setSales('');
-    setRating('');
+    setIncoming('');
+    setClosed('');
+    setFoundDriver('');
+    setNotFoundDriver('');
+    setComment('');
+    setAllowDateEdit(false);
+    setDate(new Date().toISOString().split('T')[0]);
     loadMyReports();
     if (isAdmin) loadAllReports();
     alert('Отчёт сохранён');
@@ -61,10 +98,17 @@ export default function Reports({ userId, isAdmin }) {
   const exportToExcel = () => {
     const data = allReports.map(r => ({
       'Сотрудник': usersCache[r.userId] || r.userId,
+      'Отдел': r.department || '',
       'Дата': r.date,
-      'Звонки': r.calls,
-      'Продажи': r.sales,
-      'Рейтинг': r.rating
+      'Заказы': r.orders,
+      'Запросы': r.requests,
+      'Передано': r.transferred,
+      'Прозвоны': r.calls,
+      'Входящие': r.incoming,
+      'Закрыто': r.closed,
+      'Найден исполнитель': r.foundDriver || 0,
+      'Не найден исполнитель': r.notFoundDriver || 0,
+      'Комментарии': r.comment || ''
     }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
@@ -76,13 +120,35 @@ export default function Reports({ userId, isAdmin }) {
 
   return (
     <div className="card">
-      <h2>📊 Личные отчёты (KPI)</h2>
-      <form onSubmit={handleSubmit} style={{ marginBottom: 20, display: 'flex', gap: 10, flexWrap: 'wrap' }}>
-        <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
-        <input type="number" placeholder="Звонки" value={calls} onChange={e => setCalls(e.target.value)} required />
-        <input type="number" placeholder="Продажи" value={sales} onChange={e => setSales(e.target.value)} required />
-        <input type="number" step="0.1" placeholder="Рейтинг" value={rating} onChange={e => setRating(e.target.value)} required />
-        <button className="primary" type="submit">Добавить отчёт</button>
+      <h2>📊 Личные отчёты</h2>
+      <form onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
+        <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 10 }}>
+          <div><strong>Сотрудник:</strong> {currentUser?.fullName || 'Загрузка...'}</div>
+          <div><strong>Отдел:</strong> {currentUser?.departmentId || '—'}</div>
+        </div>
+        <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 15 }}>
+          <label>
+            <input type="checkbox" checked={allowDateEdit} onChange={e => setAllowDateEdit(e.target.checked)} />
+            Изменить дату
+          </label>
+          {allowDateEdit ? (
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+          ) : (
+            <span>Дата отчёта: {new Date().toLocaleDateString()}</span>
+          )}
+        </div>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
+          <input type="number" placeholder="Заказы (внесены в CRM)" value={orders} onChange={e => setOrders(e.target.value)} required />
+          <input type="number" placeholder="Запросы (обработаны в почте)" value={requests} onChange={e => setRequests(e.target.value)} required />
+          <input type="number" placeholder="Передано" value={transferred} onChange={e => setTransferred(e.target.value)} required />
+          <input type="number" placeholder="Прозвоны" value={calls} onChange={e => setCalls(e.target.value)} required />
+          <input type="number" placeholder="Входящие" value={incoming} onChange={e => setIncoming(e.target.value)} required />
+          <input type="number" placeholder="Закрыто" value={closed} onChange={e => setClosed(e.target.value)} required />
+          <input type="number" placeholder="Найден исполнитель (логистика)" value={foundDriver} onChange={e => setFoundDriver(e.target.value)} />
+          <input type="number" placeholder="Не найден исполнитель (логистика)" value={notFoundDriver} onChange={e => setNotFoundDriver(e.target.value)} />
+        </div>
+        <textarea placeholder="Комментарии по смене" value={comment} onChange={e => setComment(e.target.value)} rows={3} style={{ marginTop: 10, width: '100%' }} />
+        <button className="primary" type="submit" style={{ marginTop: 15 }}>Добавить отчёт</button>
       </form>
 
       <div style={{ marginBottom: 15, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -95,15 +161,23 @@ export default function Reports({ userId, isAdmin }) {
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%' }}>
           <thead>
-            <tr><th>Дата</th><th>Звонки</th><th>Продажи</th><th>Рейтинг</th></tr>
+            <tr>
+              <th>Дата</th><th>Заказы</th><th>Запросы</th><th>Передано</th><th>Прозвоны</th><th>Входящие</th><th>Закрыто</th><th>Найден</th><th>Не найден</th><th>Комментарии</th>
+            </tr>
           </thead>
           <tbody>
             {myReports.map(r => (
               <tr key={r.id}>
                 <td>{r.date}</td>
+                <td>{r.orders}</td>
+                <td>{r.requests}</td>
+                <td>{r.transferred}</td>
                 <td>{r.calls}</td>
-                <td>{r.sales}</td>
-                <td>{r.rating}</td>
+                <td>{r.incoming}</td>
+                <td>{r.closed}</td>
+                <td>{r.foundDriver || 0}</td>
+                <td>{r.notFoundDriver || 0}</td>
+                <td>{r.comment || ''}</td>
               </tr>
             ))}
           </tbody>
@@ -116,16 +190,25 @@ export default function Reports({ userId, isAdmin }) {
           <div style={{ overflowX: 'auto' }}>
             <table style={{ width: '100%' }}>
               <thead>
-                <tr><th>Сотрудник</th><th>Дата</th><th>Звонки</th><th>Продажи</th><th>Рейтинг</th></tr>
+                <tr>
+                  <th>Сотрудник</th><th>Отдел</th><th>Дата</th><th>Заказы</th><th>Запросы</th><th>Передано</th><th>Прозвоны</th><th>Входящие</th><th>Закрыто</th><th>Найден</th><th>Не найден</th><th>Комментарии</th>
+                </tr>
               </thead>
               <tbody>
                 {allReports.map(r => (
                   <tr key={r.id}>
                     <td>{usersCache[r.userId] || r.userId}</td>
+                    <td>{r.department || ''}</td>
                     <td>{r.date}</td>
+                    <td>{r.orders}</td>
+                    <td>{r.requests}</td>
+                    <td>{r.transferred}</td>
                     <td>{r.calls}</td>
-                    <td>{r.sales}</td>
-                    <td>{r.rating}</td>
+                    <td>{r.incoming}</td>
+                    <td>{r.closed}</td>
+                    <td>{r.foundDriver || 0}</td>
+                    <td>{r.notFoundDriver || 0}</td>
+                    <td>{r.comment || ''}</td>
                   </tr>
                 ))}
               </tbody>
