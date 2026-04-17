@@ -1,22 +1,42 @@
-import { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, forwardRef, useImperativeHandle } from 'react';
 import FullCalendar from '@fullcalendar/react';
 import dayGridPlugin from '@fullcalendar/daygrid';
 import timeGridPlugin from '@fullcalendar/timegrid';
 import interactionPlugin from '@fullcalendar/interaction';
-import { 
-  getEvents, addEvent, updateEvent, deleteEvent, 
-  getTasksAsEvents, addTask, updateTask, deleteTask 
-} from '../services/dataService';
+import { getEvents, addEvent, updateEvent, deleteEvent, getTasksAsEvents, addTask, updateTask, deleteTask } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
-export default function Calendar({ userId, timezone }) {
+const Calendar = forwardRef(({ userId, timezone }, ref) => {
   const [events, setEvents] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [currentItem, setCurrentItem] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [itemType, setItemType] = useState('event');
+  const [itemType, setItemType] = useState('task');
   const [hasEndDate, setHasEndDate] = useState(false);
   const calendarRef = useRef(null);
+
+  const formatDateTimeLocal = (dateStr) => {
+    if (!dateStr) return '';
+    if (dateStr.includes('T')) {
+      return dateStr.slice(0, 16);
+    }
+    return `${dateStr}T12:00`;
+  };
+
+  useImperativeHandle(ref, () => ({
+    openCreateModal: () => {
+      setCurrentItem({
+        title: '',
+        start: '',
+        end: '',
+        comment: '',
+        allDay: true
+      });
+      setItemType('task');
+      setHasEndDate(false);
+      setShowModal(true);
+    }
+  }));
 
   const loadAllEvents = async () => {
     setLoading(true);
@@ -54,14 +74,20 @@ export default function Calendar({ userId, timezone }) {
   }, [userId]);
 
   const handleDateSelect = (selectInfo) => {
+    let start = selectInfo.startStr;
+    if (selectInfo.allDay) {
+      setItemType('task');
+      start = start.split('T')[0];
+    } else {
+      setItemType('event');
+    }
     setCurrentItem({
       title: '',
-      start: selectInfo.startStr,
+      start: start,
       end: selectInfo.endStr,
       comment: '',
       allDay: selectInfo.allDay
     });
-    setItemType('event');
     setHasEndDate(false);
     setShowModal(true);
   };
@@ -96,7 +122,11 @@ export default function Calendar({ userId, timezone }) {
     if (!currentItem.title) return;
     try {
       if (itemType === 'task') {
-        const dueDate = currentItem.start.split('T')[0];
+        const dueDate = currentItem.start ? currentItem.start.split('T')[0] : null;
+        if (!dueDate) {
+          alert('Выберите дату задачи');
+          return;
+        }
         if (currentItem.id) {
           await updateTask(currentItem.id, { title: currentItem.title, dueDate, comment: currentItem.comment });
         } else {
@@ -110,6 +140,10 @@ export default function Calendar({ userId, timezone }) {
         }
         window.dispatchEvent(new Event('tasks-updated'));
       } else {
+        if (!currentItem.start) {
+          alert('Выберите дату и время начала события');
+          return;
+        }
         const eventData = {
           title: currentItem.title,
           datetime: currentItem.start,
@@ -123,6 +157,7 @@ export default function Calendar({ userId, timezone }) {
         } else {
           await addEvent({ userId, ...eventData });
         }
+        window.dispatchEvent(new Event('tasks-updated'));
       }
       setShowModal(false);
       await loadAllEvents();
@@ -136,10 +171,10 @@ export default function Calendar({ userId, timezone }) {
     try {
       if (itemType === 'task') {
         await deleteTask(currentItem.id);
-        window.dispatchEvent(new Event('tasks-updated'));
       } else {
         await deleteEvent(currentItem.id);
       }
+      window.dispatchEvent(new Event('tasks-updated'));
       setShowModal(false);
       await loadAllEvents();
     } catch (err) {
@@ -150,7 +185,7 @@ export default function Calendar({ userId, timezone }) {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="card">
+    <div className="card" style={{ marginBottom: 30 }}>
       <h2>📅 Календарь</h2>
       <FullCalendar
         ref={calendarRef}
@@ -178,25 +213,17 @@ export default function Calendar({ userId, timezone }) {
       />
 
       {showModal && (
-        <div className="modal-overlay">
-          <div className="modal-content">
-            <h3>{currentItem?.id ? 'Редактировать' : 'Создать'}</h3>
-            <div style={{ marginBottom: 10 }}>
-              <label style={{ marginRight: 15 }}>
-                <input
-                  type="radio"
-                  value="task"
-                  checked={itemType === 'task'}
-                  onChange={() => setItemType('task')}
-                /> Задача (только дата)
+        <div style={modalOverlayStyle}>
+          <div style={modalContentStyle}>
+            <h3 style={{ marginTop: 0 }}>{currentItem?.id ? 'Редактировать' : 'Создать'}</h3>
+            <div style={{ marginBottom: 15, display: 'flex', gap: '15px', alignItems: 'center' }}>
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                <input type="radio" value="task" checked={itemType === 'task'} onChange={() => setItemType('task')} />
+                <span>Задача</span>
               </label>
-              <label>
-                <input
-                  type="radio"
-                  value="event"
-                  checked={itemType === 'event'}
-                  onChange={() => setItemType('event')}
-                /> Событие (с временем)
+              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
+                <input type="radio" value="event" checked={itemType === 'event'} onChange={() => setItemType('event')} />
+                <span>Событие</span>
               </label>
             </div>
             <input
@@ -204,53 +231,83 @@ export default function Calendar({ userId, timezone }) {
               placeholder="Название"
               value={currentItem.title}
               onChange={e => setCurrentItem({...currentItem, title: e.target.value})}
+              style={{ width: '100%', marginBottom: 12 }}
             />
-            <label>Дата / время начала:</label>
-            <input
-              type={itemType === 'task' ? 'date' : 'datetime-local'}
-              value={itemType === 'task' ? currentItem.start?.split('T')[0] : currentItem.start?.slice(0, 16)}
-              onChange={e => {
-                const newStart = itemType === 'task' ? e.target.value : e.target.value;
-                setCurrentItem({...currentItem, start: newStart});
-              }}
-            />
-            {itemType === 'event' && (
-              <div>
-                <label style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 10 }}>
-                  <input
-                    type="checkbox"
-                    checked={hasEndDate}
-                    onChange={e => setHasEndDate(e.target.checked)}
-                  />
-                  Указать дату окончания
-                </label>
-                {hasEndDate && (
+            {itemType === 'task' ? (
+              <div style={{ marginBottom: 12 }}>
+                <label>Дата:</label>
+                <input
+                  type="date"
+                  value={currentItem.start ? currentItem.start.split('T')[0] : ''}
+                  onChange={e => setCurrentItem({...currentItem, start: e.target.value})}
+                  style={{ width: '100%' }}
+                />
+              </div>
+            ) : (
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <label>Дата и время начала:</label>
                   <input
                     type="datetime-local"
-                    placeholder="Окончание"
-                    value={currentItem.end?.slice(0, 16) || ''}
-                    onChange={e => setCurrentItem({...currentItem, end: e.target.value})}
+                    value={formatDateTimeLocal(currentItem.start)}
+                    onChange={e => setCurrentItem({...currentItem, start: e.target.value})}
+                    style={{ width: '100%' }}
                   />
-                )}
-              </div>
+                </div>
+                <div>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 12 }}>
+                    <input
+                      type="checkbox"
+                      checked={hasEndDate}
+                      onChange={e => setHasEndDate(e.target.checked)}
+                    />
+                    Указать дату окончания
+                  </label>
+                  {hasEndDate && (
+                    <input
+                      type="datetime-local"
+                      value={formatDateTimeLocal(currentItem.end)}
+                      onChange={e => setCurrentItem({...currentItem, end: e.target.value})}
+                      style={{ width: '100%', marginBottom: 12 }}
+                    />
+                  )}
+                </div>
+              </>
             )}
             <textarea
               placeholder="Комментарий"
               value={currentItem.comment || ''}
               onChange={e => setCurrentItem({...currentItem, comment: e.target.value})}
               rows={3}
+              style={{ width: '100%', marginBottom: 12 }}
             />
-            <div style={{ display: 'flex', justifyContent: 'space-between', marginTop: 16 }}>
-              <button className="primary" onClick={saveItem}>Сохранить</button>
-              {currentItem.id && <button className="danger" onClick={deleteItem}>Удалить</button>}
-              <button className="secondary" onClick={() => setShowModal(false)}>Отмена</button>
+            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+              <button onClick={saveItem}>Сохранить</button>
+              {currentItem.id && <button onClick={deleteItem} style={{ background: '#dc3545', color: 'white' }}>Удалить</button>}
+              <button onClick={() => setShowModal(false)}>Отмена</button>
             </div>
             {itemType === 'task' && (
-              <p style={{ fontSize: 12, marginTop: 10, color: 'var(--text-muted)' }}>Задача будет отображаться как целодневное событие.</p>
+              <p style={{ fontSize: 12, marginTop: 10 }}>Если дата не указана, задача не будет отображаться в календаре.</p>
             )}
           </div>
         </div>
       )}
     </div>
   );
-}
+});
+
+const modalOverlayStyle = {
+  position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+  background: 'rgba(0,0,0,0.5)', display: 'flex', justifyContent: 'center', alignItems: 'center', zIndex: 1000
+};
+const modalContentStyle = {
+  background: 'var(--bg-card)',
+  backdropFilter: 'blur(8px)',
+  border: '1px solid var(--glass-border)',
+  borderRadius: 'var(--radius-md)',
+  padding: '20px',
+  width: '400px',
+  color: 'var(--text-primary)'
+};
+
+export default Calendar;

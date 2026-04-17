@@ -1,8 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import Login from './components/Login';
 import AttentionBlock from './components/AttentionBlock';
 import Calendar from './components/Calendar';
-import TaskList from './components/TaskList';
 import UpcomingView from './components/UpcomingView';
 import Assignments from './components/Assignments';
 import ResourcesPanel from './components/ResourcesPanel';
@@ -11,6 +10,10 @@ import Booking from './components/Booking';
 import Employees from './components/Employees';
 import Development from './components/Development';
 import Reports from './components/Reports';
+import Schedule from './components/Schedule';
+import NotesSidebar from './components/NotesSidebar';
+import TodayItemsSidebar from './components/TodayItemsSidebar';
+import LogsViewer from './components/LogsViewer';
 import AdminPanel from './components/AdminPanel';
 import './index.css';
 
@@ -20,6 +23,7 @@ function App() {
   const [timezone, setTimezone] = useState(localStorage.getItem('timezone') || 'Europe/Moscow');
   const [mainTab, setMainTab] = useState('organizer');
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
+  const calendarRef = useRef();
 
   useEffect(() => {
     localStorage.setItem('timezone', timezone);
@@ -42,6 +46,12 @@ function App() {
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
+  };
+
+  const handleAddToday = () => {
+    if (calendarRef.current) {
+      calendarRef.current.openCreateModal();
+    }
   };
 
   return (
@@ -70,7 +80,16 @@ function App() {
       </button>
 
       <div className="app-container">
-        <header style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '20px' }}>
+        <header style={{ 
+          display: 'flex', 
+          justifyContent: 'space-between', 
+          alignItems: 'center', 
+          flexWrap: 'wrap', 
+          gap: '20px',
+          maxWidth: '1200px',
+          margin: '0 auto',
+          width: '100%'
+        }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
             <img src="/logo.png" alt="Logo" style={{ height: '40px' }} />
             <h1>Органайзер CRM</h1>
@@ -83,39 +102,55 @@ function App() {
               <option value="Europe/London">Лондон (UTC+0)</option>
               <option value="America/New_York">Нью-Йорк (UTC-4)</option>
             </select>
-            <button className={`nav-button ${mainTab === 'organizer' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('organizer')}>Органайзер</button>
+            <button className={`nav-button ${mainTab === 'organizer' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('organizer')}>Профиль</button>
             <button className={`nav-button ${mainTab === 'logistics' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('logistics')}>Логистика</button>
             <button className={`nav-button ${mainTab === 'booking' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('booking')}>Бронирование</button>
             <button className={`nav-button ${mainTab === 'employees' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('employees')}>Сотрудники</button>
             <button className={`nav-button ${mainTab === 'development' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('development')}>Развитие</button>
             <button className={`nav-button ${mainTab === 'reports' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('reports')}>Отчёты</button>
+            <button className={`nav-button ${mainTab === 'schedule' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('schedule')}>График</button>
             {isAdmin && <button className="danger" onClick={() => setShowAdmin(true)}>👑 Админ-панель</button>}
+            {isAdmin && <button className={`nav-button ${mainTab === 'logs' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('logs')}>Логи</button>}
             <button className="secondary" onClick={() => setCurrentUser(null)}>Выйти</button>
           </div>
         </header>
 
         {mainTab === 'organizer' && (
-          <>
-            <AttentionBlock userId={currentUser.id} departmentId={currentUser.departmentId} />
-            <Calendar userId={currentUser.id} timezone={timezone} />
-            <TaskList userId={currentUser.id} filter="today" />
-            <UpcomingView userId={currentUser.id} />
-            <Assignments currentUser={currentUser} />
-            <ResourcesPanel />
-          </>
+          <div className="profile-container">
+            <div style={{
+              display: 'grid',
+              gridTemplateColumns: '1fr auto 1fr',
+              gap: '20px',
+              marginTop: '20px'
+            }}>
+              <div style={{ justifySelf: 'end' }}>
+                <NotesSidebar userId={currentUser.id} />
+              </div>
+              <div style={{ width: '1200px' }}>
+                <AttentionBlock userId={currentUser.id} departmentId={currentUser.departmentId} />
+                <Calendar ref={calendarRef} userId={currentUser.id} timezone={timezone} />
+                <UpcomingView userId={currentUser.id} />
+                <Assignments currentUser={currentUser} />
+                <ResourcesPanel />
+              </div>
+              <div style={{ justifySelf: 'start' }}>
+                <TodayItemsSidebar userId={currentUser.id} onAddClick={handleAddToday} />
+              </div>
+            </div>
+          </div>
         )}
 
-        {mainTab === 'logistics' && <Logistics userId={currentUser.id} />}
-        {mainTab === 'booking' && <Booking userId={currentUser.id} />}
+        {mainTab === 'logistics' && <Logistics userId={currentUser.id} currentUser={currentUser} />}
+        {mainTab === 'booking' && <Booking userId={currentUser.id} currentUser={currentUser} />}
         {mainTab === 'employees' && <Employees currentUserId={currentUser.id} />}
-        {mainTab === 'development' && <Development userId={currentUser.id} departmentId={currentUser.departmentId} />}
-        {mainTab === 'reports' && (
-          <Reports 
-            userId={currentUser.id} 
-            currentUserRole={currentUser.role}
-            currentUserDepartmentId={currentUser.departmentId}
-          />
+        {mainTab === 'development' && <Development userId={currentUser.id} departmentId={currentUser.departmentId} currentUser={currentUser} />}
+        {mainTab === 'reports' && <Reports userId={currentUser.id} currentUserRole={currentUser.role} currentUserDepartmentId={currentUser.departmentId} currentUser={currentUser} />}
+        {mainTab === 'schedule' && (
+          <div className="schedule-container">
+            <Schedule currentUser={currentUser} />
+          </div>
         )}
+        {mainTab === 'logs' && isAdmin && <LogsViewer />}
         {showAdmin && <AdminPanel currentUser={currentUser} onClose={() => setShowAdmin(false)} />}
       </div>
     </>

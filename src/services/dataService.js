@@ -1,11 +1,39 @@
 import { db } from '../firebase';
 import { 
   collection, addDoc, updateDoc, deleteDoc, doc, getDoc,
-  getDocs, query, where, Timestamp, writeBatch 
+  getDocs, query, where, orderBy, Timestamp, writeBatch 
 } from 'firebase/firestore';
 
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 const todayStr = () => new Date().toISOString().split('T')[0];
+
+// ===================== ЛОГИ =====================
+// Получить все логи (только для админов)
+export const getAllLogs = async () => {
+  const q = query(collection(db, 'admin_logs'), orderBy('timestamp', 'desc'));
+  const snapshot = await getDocs(q);
+  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+};
+
+// Добавить запись в лог
+export const addLog = async (userId, userName, action, details = '') => {
+  let ip = 'неизвестно';
+  try {
+    const res = await fetch('https://api.ipify.org?format=json');
+    const data = await res.json();
+    ip = data.ip;
+  } catch (e) {
+    console.error('Не удалось определить IP', e);
+  }
+  await addDoc(collection(db, 'admin_logs'), {
+    userId,
+    userName,
+    action,
+    details,
+    ip,
+    timestamp: Timestamp.now()
+  });
+};
 
 // ===================== ЗАДАЧИ =====================
 export const getTasks = async (userId, filter = 'all') => {
@@ -47,6 +75,7 @@ export const getTasksAsEvents = async (userId) => {
     title: t.title,
     start: t.dueDate,
     allDay: true,
+    className: t.status === 'done' ? 'task-done' : '',
     extendedProps: { type: 'task', originalId: t.id, status: t.status, comment: t.comment || '' }
   }));
 };
@@ -102,7 +131,7 @@ export const getEventsByDate = async (userId, date) => {
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
-// ===================== ПОРУЧЕНИЯ (с автостатусом) =====================
+// ===================== ПОРУЧЕНИЯ =====================
 export const getAssignmentsReceived = async (userId, departmentId) => {
   const q1 = query(collection(db, 'assignments'), where('toUserId', '==', userId));
   const q2 = query(collection(db, 'assignments'), where('toDepartmentId', '==', departmentId), where('toUserId', '==', null));
@@ -583,27 +612,6 @@ export const deleteChecklist = async (id) => {
   await deleteDoc(doc(db, 'booking_checklists', id));
 };
 
-// ===================== БРОНИРОВАНИЕ: ЛИЧНАЯ ВАЛЮТА =====================
-export const getBalance = async (userId) => {
-  const q = query(collection(db, 'booking_balance'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return { points: 0, history: [] };
-  const docData = snapshot.docs[0].data();
-  return { id: snapshot.docs[0].id, points: docData.points || 0, history: docData.history || [] };
-};
-
-export const addPoints = async (userId, amount, reason) => {
-  const balance = await getBalance(userId);
-  const newPoints = (balance.points || 0) + amount;
-  const historyItem = { amount, reason, date: new Date().toISOString(), type: 'credit' };
-  const newHistory = [...(balance.history || []), historyItem];
-  if (balance.id) {
-    await updateDoc(doc(db, 'booking_balance', balance.id), { points: newPoints, history: newHistory });
-  } else {
-    await addDoc(collection(db, 'booking_balance'), { userId, points: newPoints, history: newHistory });
-  }
-};
-
 // ===================== БРОНИРОВАНИЕ: ЗАПИСНАЯ КНИЖКА =====================
 export const getNotebook = async (userId) => {
   const q = query(collection(db, 'booking_notebook'), where('userId', '==', userId));
@@ -709,4 +717,93 @@ export const getExpiringContracts = async (userId, daysThreshold = 30) => {
     const end = new Date(c.endDate);
     return end >= today && end <= future;
   });
+};
+// ===================== ОБНОВЛЕНИЕ ПОРЯДКА СОТРУДНИКОВ =====================
+export const updateUsersOrder = async (orderedUsers) => {
+  const batch = writeBatch(db);
+  orderedUsers.forEach((user, index) => {
+    const userRef = doc(db, 'users', user.id);
+    batch.update(userRef, { order: index });
+  });
+  await batch.commit();
+};
+// ===================== УВЕДОМЛЕНИЯ =====================
+// Запросить разрешение на уведомления
+export const requestNotificationPermission = async () => {
+  if (!('Notification' in window)) {
+    console.log('Браузер не поддерживает уведомления');
+    return false;
+  }
+  if (Notification.permission === 'granted') {
+    return true;
+  }
+  if (Notification.permission !== 'denied') {
+    const permission = await Notification.requestPermission();
+    return permission === 'granted';
+  }
+  return false;
+};
+
+// Отправить браузерное уведомление
+export const sendBrowserNotification = (title, body, icon = '/logo.png') => {
+  if (!('Notification' in window)) return;
+  if (Notification.permission === 'granted') {
+    new Notification(title, { body, icon });
+  }
+};
+
+// Сохранить уведомление в localStorage для внутреннего интерфейса
+export const addNotification = (title, message, type = 'info') => {
+  const notifications = JSON.parse(localStorage.getItem('app_notifications') || '[]');
+  notifications.unshift({
+    id: Date.now(),
+    title,
+    message,
+    type,
+    timestamp: new Date().toISOString(),
+    read: false
+  });
+  // Оставляем только последние 50 уведомлений
+  if (notifications.length > 50) notifications.pop();
+  localStorage.setItem('app_notifications', JSON.stringify(notifications));
+  // Диспатчим событие для обновления счётчика
+  window.dispatchEvent(new Event('notifications-updated'));
+};
+
+// Получить все уведомления
+export const getNotifications = () => {
+  return JSON.parse(localStorage.getItem('app_notifications') || '[]');
+};
+
+// Отметить уведомление как прочитанное
+export const markNotificationRead = (id) => {
+  const notifications = getNotifications();
+  const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
+  localStorage.setItem('app_notifications', JSON.stringify(updated));
+  window.dispatchEvent(new Event('notifications-updated'));
+};
+
+// Отметить все как прочитанные
+export const markAllNotificationsRead = () => {
+  const notifications = getNotifications();
+  const updated = notifications.map(n => ({ ...n, read: true }));
+  localStorage.setItem('app_notifications', JSON.stringify(updated));
+  window.dispatchEvent(new Event('notifications-updated'));
+};
+
+// ===================== ПОЛУЧЕНИЕ УНИКАЛЬНЫХ ОТДЕЛОВ ИЗ ПОЛЬЗОВАТЕЛЕЙ =====================
+export const getUniqueDepartments = async () => {
+  const users = await getAllUsers();
+  const deptMap = new Map();
+  users.forEach(user => {
+    if (user.departmentId && !deptMap.has(user.departmentId)) {
+      let name = user.departmentId;
+      if (user.departmentId === 'dept1') name = 'Логистика';
+      else if (user.departmentId === 'dept3') name = 'Бухгалтерия';
+      else if (user.departmentId === 'dept4') name = 'Бронирование';
+      else if (user.departmentId === 'dept5') name = 'Качество';
+      deptMap.set(user.departmentId, { id: user.departmentId, name });
+    }
+  });
+  return Array.from(deptMap.values());
 };

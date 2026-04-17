@@ -4,10 +4,26 @@ import {
   getShiftsByMonth, setShiftForDate, createShiftRequest,
   getShiftRequestsForManager, updateShiftRequest, getAllUsers,
   saveShiftsBatch, createOvertimeRequest, getOvertimeRequestsForManager,
-  updateOvertimeRequest, addLog
+  updateOvertimeRequest, addLog, updateUsersOrder
 } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 import ImportModal from './ImportModal';
+import {
+  DndContext,
+  closestCenter,
+  KeyboardSensor,
+  PointerSensor,
+  useSensor,
+  useSensors,
+} from '@dnd-kit/core';
+import {
+  arrayMove,
+  SortableContext,
+  sortableKeyboardCoordinates,
+  verticalListSortingStrategy,
+} from '@dnd-kit/sortable';
+import { useSortable } from '@dnd-kit/sortable';
+import { CSS } from '@dnd-kit/utilities';
 
 const departments = [
   { id: 'dept1', name: 'Логистика' },
@@ -19,7 +35,31 @@ const departments = [
 const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const weekDays = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
 
-export default function ShiftSchedule({ currentUser }) {
+const SortableRow = ({ user, children, isEditing }) => {
+  const {
+    attributes,
+    listeners,
+    setNodeRef,
+    transform,
+    transition,
+    isDragging,
+  } = useSortable({ id: user.id });
+
+  const style = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    opacity: isDragging ? 0.5 : 1,
+    cursor: isEditing ? 'grab' : 'default',
+  };
+
+  return (
+    <tr ref={setNodeRef} style={style} {...(isEditing ? attributes : {})} {...(isEditing ? listeners : {})}>
+      {children}
+    </tr>
+  );
+};
+
+export default function Schedule({ currentUser }) {
   const [selectedYear, setSelectedYear] = useState(new Date().getFullYear());
   const [selectedMonth, setSelectedMonth] = useState(new Date().getMonth());
   const [shifts, setShifts] = useState({});
@@ -36,6 +76,20 @@ export default function ShiftSchedule({ currentUser }) {
   const [showImportModal, setShowImportModal] = useState(false);
   const [workingNow, setWorkingNow] = useState([]);
   const [isLightTheme, setIsLightTheme] = useState(document.body.classList.contains('light-theme'));
+  const [sortedUsers, setSortedUsers] = useState([]);
+  const [showFillModal, setShowFillModal] = useState(false);
+  const [fillEmployeeId, setFillEmployeeId] = useState('');
+  const [fillValue, setFillValue] = useState('');
+  const [fillEmployeesList, setFillEmployeesList] = useState([]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor),
+    useSensor(KeyboardSensor, {
+      coordinateGetter: sortableKeyboardCoordinates,
+    })
+  );
+
+  const canEdit = () => currentUser.role === 'manager' || currentUser.role === 'admin' || currentUser.isIT === true;
 
   useEffect(() => {
     const observer = new MutationObserver(() => {
@@ -59,7 +113,17 @@ export default function ShiftSchedule({ currentUser }) {
       const shiftsMap = {};
       shiftsData.forEach(s => { shiftsMap[`${s.userId}_${s.date}`] = s.value; });
       setShifts(shiftsMap);
-      setUsers(allUsers.filter(u => u.role !== 'admin' && u.departmentId !== 'dept2'));
+      const filteredUsers = allUsers.filter(u => u.role !== 'admin' && u.departmentId !== 'dept2');
+      const sorted = filteredUsers.sort((a, b) => {
+        const indexA = departments.findIndex(d => d.id === a.departmentId);
+        const indexB = departments.findIndex(d => d.id === b.departmentId);
+        if (indexA !== indexB) return indexA - indexB;
+        const orderA = a.order !== undefined ? a.order : 9999;
+        const orderB = b.order !== undefined ? b.order : 9999;
+        if (orderA !== orderB) return orderA - orderB;
+        return a.fullName.localeCompare(b.fullName);
+      });
+      setSortedUsers(sorted);
       setEditedShifts({});
       setPendingChanges([]);
     } catch (err) {
@@ -126,8 +190,6 @@ export default function ShiftSchedule({ currentUser }) {
     const date = new Date(year, month, day);
     return weekDays[date.getDay() === 0 ? 6 : date.getDay() - 1];
   };
-
-  const canEdit = () => currentUser.role === 'manager' || currentUser.role === 'admin' || currentUser.isIT === true;
 
   const getCellValue = (userId, date) => {
     if (canEdit()) {
@@ -280,7 +342,7 @@ export default function ShiftSchedule({ currentUser }) {
       const employeeName = row['Сотрудник'];
       const date = row['Дата'];
       const value = row['Значение'];
-      const user = users.find(u => u.fullName === employeeName);
+      const user = sortedUsers.find(u => u.fullName === employeeName);
       if (user && date && value !== undefined) {
         newShifts[`${user.id}_${date}`] = value;
       }
@@ -293,16 +355,59 @@ export default function ShiftSchedule({ currentUser }) {
     alert(`Импортировано ${Object.keys(newShifts).length} записей. Нажмите "Сохранить график" для применения.`);
   };
 
+  const handleDragEnd = async (event) => {
+    const { active, over } = event;
+    if (active.id !== over.id) {
+      const activeUser = sortedUsers.find(u => u.id === active.id);
+      const overUser = sortedUsers.find(u => u.id === over.id);
+      if (activeUser && overUser && activeUser.departmentId === overUser.departmentId) {
+        const oldIndex = sortedUsers.findIndex(u => u.id === active.id);
+        const newIndex = sortedUsers.findIndex(u => u.id === over.id);
+        const newOrder = arrayMove(sortedUsers, oldIndex, newIndex);
+        setSortedUsers(newOrder);
+        const deptUsers = newOrder.filter(u => u.departmentId === activeUser.departmentId);
+        await updateUsersOrder(deptUsers);
+        await addLog(currentUser.id, currentUser.fullName, 'Изменение порядка сотрудников', `Отдел: ${activeUser.departmentId}`);
+      } else if (activeUser && overUser) {
+        alert('Нельзя перемещать сотрудников между разными отделами');
+      }
+    }
+  };
+
+  const openFillModal = () => {
+    let employees = [];
+    if (currentUser.role === 'admin' || currentUser.isIT) {
+      employees = sortedUsers;
+    } else {
+      employees = sortedUsers.filter(u => u.departmentId === currentUser.departmentId);
+    }
+    setFillEmployeesList(employees);
+    setFillEmployeeId('');
+    setFillValue('');
+    setShowFillModal(true);
+  };
+
+  const handleFillMonth = async () => {
+    if (!fillEmployeeId || !fillValue) {
+      alert('Выберите сотрудника и укажите значение');
+      return;
+    }
+    const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
+    const newShifts = { ...editedShifts };
+    for (let day = 1; day <= daysInMonth; day++) {
+      const date = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      const isWeekendDay = isWeekend(selectedYear, selectedMonth, day);
+      if (!isWeekendDay) {
+        newShifts[`${fillEmployeeId}_${date}`] = fillValue;
+      }
+    }
+    setEditedShifts(newShifts);
+    setShowFillModal(false);
+    alert(`Для выбранного сотрудника заполнены будние дни значением "${fillValue}". Не забудьте сохранить график.`);
+  };
+
   const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
-
-  const sortedUsers = [...users]
-    .filter(u => departments.some(d => d.id === u.departmentId))
-    .sort((a, b) => {
-      const indexA = departments.findIndex(d => d.id === a.departmentId);
-      const indexB = departments.findIndex(d => d.id === b.departmentId);
-      return indexA - indexB;
-    });
 
   const borderColor = isLightTheme ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.03)';
   const monthBg = isLightTheme ? '#A2C5E5' : 'rgba(162,197,229,0.12)';
@@ -314,48 +419,54 @@ export default function ShiftSchedule({ currentUser }) {
 
   const thStyle = {
     border: `1px solid ${borderColor}`,
-    padding: '4px 2px',
+    padding: '8px',
     backgroundColor: weekdayBg,
     color: textColor,
     textAlign: 'center',
     fontWeight: 'bold',
-    fontSize: '0.7rem'
+    fontSize: '0.7rem',
+    whiteSpace: 'nowrap'
   };
   const tdStyle = {
     border: `1px solid ${borderColor}`,
-    padding: '4px 2px',
+    padding: '8px',
     textAlign: 'center',
-    fontSize: '0.7rem'
+    fontSize: '0.7rem',
+    whiteSpace: 'nowrap'
   };
 
   const renderTable = () => {
-    const colWidth = 55;
-    const firstColWidth = 130;
-
-    const header = (
-      <thead>
-        <tr>
-          <td colSpan={monthDays.length + 1} style={{ backgroundColor: monthBg, color: textColor, padding: '4px', textAlign: 'center', border: `1px solid ${borderColor}`, fontWeight: 'bold' }}>
-            {monthNames[selectedMonth]} {selectedYear}
-          </td>
-        </tr>
-        <tr>
-          <th style={{ ...thStyle, position: 'sticky', left: 0, zIndex: 2, backgroundColor: weekdayBg, minWidth: firstColWidth }}>Сотрудник</th>
-          {monthDays.map(day => (
-            <th key={`wd_${day}`} style={{ ...thStyle, minWidth: colWidth }}>{getWeekdayForDate(selectedYear, selectedMonth, day)}</th>
-          ))}
-        </tr>
-        <tr>
-          <th style={{ ...thStyle, position: 'sticky', left: 0, zIndex: 2, backgroundColor: weekdayBg, minWidth: firstColWidth }}>Дата</th>
-          {monthDays.map(day => (
-            <th key={`dt_${day}`} style={{ ...thStyle, minWidth: colWidth }}>{day}</th>
-          ))}
-        </tr>
-      </thead>
+    // Строка с названием месяца (будет в начале)
+    const monthRow = (
+      <tr key="month">
+        <td colSpan={monthDays.length + 1} style={{ backgroundColor: monthBg, color: textColor, padding: '4px', textAlign: 'center', border: `1px solid ${borderColor}`, fontWeight: 'bold' }}>
+          {monthNames[selectedMonth]} {selectedYear}
+        </td>
+      </tr>
     );
 
-    const bodyRows = [];
+    // Шапка для дней недели (первая ячейка пустая)
+    const weekdaysRow = (
+      <tr key="weekdays">
+        <th style={thStyle}></th>
+        {monthDays.map(day => (
+          <th key={`wd_${day}`} style={thStyle}>{getWeekdayForDate(selectedYear, selectedMonth, day)}</th>
+        ))}
+      </tr>
+    );
+
+    // Шапка для дат (первая ячейка пустая)
+    const datesRow = (
+      <tr key="dates">
+        <th style={thStyle}></th>
+        {monthDays.map(day => (
+          <th key={`dt_${day}`} style={thStyle}>{day}</th>
+        ))}
+      </tr>
+    );
+
     let currentDept = null;
+    const bodyRows = [];
 
     for (const user of sortedUsers) {
       const deptName = departments.find(d => d.id === user.departmentId)?.name || user.departmentId;
@@ -368,22 +479,9 @@ export default function ShiftSchedule({ currentUser }) {
             </td>
           </tr>
         );
-        bodyRows.push(
-          <tr key={`dept_${deptName}_weekdays`}>
-            <th style={{ ...thStyle, position: 'sticky', left: 0, zIndex: 2, backgroundColor: weekdayBg, minWidth: firstColWidth }}>Сотрудник</th>
-            {monthDays.map(day => (
-              <th key={`wd_${deptName}_${day}`} style={{ ...thStyle, minWidth: colWidth }}>{getWeekdayForDate(selectedYear, selectedMonth, day)}</th>
-            ))}
-          </tr>
-        );
-        bodyRows.push(
-          <tr key={`dept_${deptName}_dates`}>
-            <th style={{ ...thStyle, position: 'sticky', left: 0, zIndex: 2, backgroundColor: weekdayBg, minWidth: firstColWidth }}>Дата</th>
-            {monthDays.map(day => (
-              <th key={`dt_${deptName}_${day}`} style={{ ...thStyle, minWidth: colWidth }}>{day}</th>
-            ))}
-          </tr>
-        );
+        // Добавляем строки с днями недели и датами после названия отдела
+        bodyRows.push(weekdaysRow);
+        bodyRows.push(datesRow);
       }
 
       const cells = monthDays.map(day => {
@@ -396,7 +494,6 @@ export default function ShiftSchedule({ currentUser }) {
             key={`cell_${user.id}_${date}`}
             style={{
               ...tdStyle,
-              minWidth: colWidth,
               backgroundColor: isWeekendDay ? weekendBg : defaultCellBg,
               cursor: 'pointer'
             }}
@@ -424,21 +521,35 @@ export default function ShiftSchedule({ currentUser }) {
           </td>
         );
       });
+
       bodyRows.push(
-        <tr key={`row_${user.id}`}>
-          <td style={{ ...tdStyle, position: 'sticky', left: 0, zIndex: 1, fontWeight: 'bold', background: 'rgba(255,255,255,0.05)', minWidth: firstColWidth }}>{user.fullName}</td>
+        <SortableRow key={user.id} user={user} isEditing={canEdit()}>
+          <td style={{ ...tdStyle, fontWeight: 'bold', background: 'rgba(255,255,255,0.05)' }}>{user.fullName}</td>
           {cells}
-        </tr>
+        </SortableRow>
       );
     }
 
     return (
-      <div style={{ width: '100%', overflowX: 'auto' }}>
-        <table style={{ width: '100%', minWidth: '1200px', borderCollapse: 'collapse' }}>
-          {header}
-          <tbody>{bodyRows}</tbody>
+      <DndContext
+        sensors={sensors}
+        collisionDetection={closestCenter}
+        onDragEnd={handleDragEnd}
+      >
+        <SortableContext
+          items={sortedUsers.map(u => u.id)}
+          strategy={verticalListSortingStrategy}
+        >
+          <table style={{ width: 'max-content', borderCollapse: 'collapse' }}>
+            <thead>
+              {monthRow}
+            </thead>
+            <tbody>
+              {bodyRows}
+            </tbody>
         </table>
-      </div>
+        </SortableContext>
+      </DndContext>
     );
   };
 
@@ -448,105 +559,132 @@ export default function ShiftSchedule({ currentUser }) {
   const hasEditedShifts = Object.keys(editedShifts).length > 0;
 
   return (
-    <div className="card" style={{ padding: '20px', width: '100%', overflowX: 'auto' }}>
-      <h2>⏰ Сейчас работают (Новосибирск)</h2>
-      {workingNow.length === 0 ? <p>Никто не работает в данный момент</p> : (
-        <ul>
-          {workingNow.map(name => <li key={name}>{name}</li>)}
-        </ul>
-      )}
+    <div style={{ textAlign: 'center' }}>
+      <div className="card" style={{ display: 'inline-block', padding: '20px', width: 'max-content', boxSizing: 'border-box', textAlign: 'left' }}>
+        <h2>⏰ Сейчас работают (Новосибирск)</h2>
+        {workingNow.length === 0 ? <p>Никто не работает в данный момент</p> : (
+          <ul>
+            {workingNow.map(name => <li key={name}>{name}</li>)}
+          </ul>
+        )}
 
-      <h2 style={{ marginTop: '20px' }}>📅 График смен</h2>
-      <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
-        <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value))}>
-          {[2023, 2024, 2025, 2026].map(y => <option key={y}>{y}</option>)}
-        </select>
-        <select value={selectedMonth} onChange={e => setSelectedMonth(parseInt(e.target.value))}>
-          {monthNames.map((m, idx) => <option key={idx} value={idx}>{m}</option>)}
-        </select>
+        <h2 style={{ marginTop: '20px' }}>📅 График смен</h2>
+        <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
+          <select value={selectedYear} onChange={e => setSelectedYear(parseInt(e.target.value))}>
+            {[2023, 2024, 2025, 2026].map(y => <option key={y}>{y}</option>)}
+          </select>
+          <select value={selectedMonth} onChange={e => setSelectedMonth(parseInt(e.target.value))}>
+            {monthNames.map((m, idx) => <option key={idx} value={idx}>{m}</option>)}
+          </select>
 
-        {canEdit() && (
-          <>
-            <button className="secondary" onClick={exportToExcel}>📎 Экспорт</button>
-            <button className="secondary" onClick={() => setShowImportModal(true)}>📂 Импорт</button>
-            {hasEditedShifts && (
-              <button className="primary" onClick={saveAllChanges} disabled={saving}>
-                {saving ? 'Сохранение...' : '💾 Сохранить'}
+          {canEdit() && (
+            <>
+              <button className="secondary" onClick={exportToExcel}>📎 Экспорт</button>
+              <button className="secondary" onClick={() => setShowImportModal(true)}>📂 Импорт</button>
+              <button className="secondary" onClick={openFillModal}>📋 Заполнить 5/2</button>
+              {hasEditedShifts && (
+                <button className="primary" onClick={saveAllChanges} disabled={saving}>
+                  {saving ? 'Сохранение...' : '💾 Сохранить'}
+                </button>
+              )}
+            </>
+          )}
+
+          {!canEdit() && hasPendingChanges && (
+            <>
+              <button className="primary" onClick={sendChangeRequest}>📨 Изменить график</button>
+              <button className="primary" onClick={sendOvertimeRequest}>⏱️ Переработка</button>
+            </>
+          )}
+
+          {canEdit() && (
+            <>
+              <button className="secondary" onClick={() => { loadRequests(); setShowRequests(!showRequests); }}>
+                {showRequests ? 'Скрыть смены' : 'Запросы смен'}
               </button>
+              <button className="secondary" onClick={() => { loadRequests(); setShowOvertimeRequests(!showOvertimeRequests); }}>
+                {showOvertimeRequests ? 'Скрыть переработки' : 'Запросы переработок'}
+              </button>
+            </>
+          )}
+        </div>
+
+        {showRequests && canEdit() && (
+          <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 8 }}>
+            <h4>Запросы на изменение графика</h4>
+            {requests.length === 0 ? <p>Нет запросов</p> : (
+              requests.map(req => (
+                <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
+                  <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
+                  <ul>
+                    {req.proposedShifts.map((shift, idx) => {
+                      const user = users.find(u => u.id === shift.userId);
+                      return <li key={`${req.id}_${idx}`}>{user?.fullName} – {shift.date}: {shift.oldValue} → {shift.newValue}</li>;
+                    })}
+                  </ul>
+                  <button className="success" onClick={() => handleApproveRequest(req)}>✅ Одобрить</button>
+                  <button className="danger" onClick={() => handleRejectRequest(req)}>❌ Отклонить</button>
+                </div>
+              ))
             )}
-          </>
+          </div>
         )}
 
-        {!canEdit() && hasPendingChanges && (
-          <>
-            <button className="primary" onClick={sendChangeRequest}>📨 Изменить график</button>
-            <button className="primary" onClick={sendOvertimeRequest}>⏱️ Переработка</button>
-          </>
+        {showOvertimeRequests && canEdit() && (
+          <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 8 }}>
+            <h4>Запросы на переработку</h4>
+            {overtimeRequests.length === 0 ? <p>Нет запросов</p> : (
+              overtimeRequests.map(req => (
+                <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
+                  <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
+                  <p><strong>Дата:</strong> {req.shiftDate}</p>
+                  <p><strong>Текущее значение:</strong> {req.originalValue}</p>
+                  <p><strong>Переработка:</strong> +{req.overtimeHours} ч.</p>
+                  <p><strong>Новое значение:</strong> {req.originalValue}+{req.overtimeHours}</p>
+                  <button className="success" onClick={() => handleApproveOvertime(req)}>✅ Одобрить</button>
+                  <button className="danger" onClick={() => handleRejectOvertime(req)}>❌ Отклонить</button>
+                </div>
+              ))
+            )}
+          </div>
         )}
 
-        {canEdit() && (
-          <>
-            <button className="secondary" onClick={() => { loadRequests(); setShowRequests(!showRequests); }}>
-              {showRequests ? 'Скрыть смены' : 'Запросы смен'}
-            </button>
-            <button className="secondary" onClick={() => { loadRequests(); setShowOvertimeRequests(!showOvertimeRequests); }}>
-              {showOvertimeRequests ? 'Скрыть переработки' : 'Запросы переработок'}
-            </button>
-          </>
+        {renderTable()}
+
+        <ImportModal
+          isOpen={showImportModal}
+          onClose={() => setShowImportModal(false)}
+          onImport={handleImportData}
+          title="Графика смен"
+          expectedColumns={['Сотрудник', 'Дата', 'Значение']}
+          requiredColumns={['Сотрудник', 'Дата', 'Значение']}
+          sampleTemplate={`Сотрудник,Дата,Значение\nИванов Иван,2025-04-01,Д\nПетрова Анна,2025-04-01,9-18`}
+        />
+
+        {showFillModal && (
+          <div className="modal-overlay">
+            <div className="modal-content">
+              <h3>Заполнить будние дни по шаблону 5/2</h3>
+              <select value={fillEmployeeId} onChange={e => setFillEmployeeId(e.target.value)}>
+                <option value="">Выберите сотрудника</option>
+                {fillEmployeesList.map(emp => (
+                  <option key={emp.id} value={emp.id}>{emp.fullName} ({departments.find(d => d.id === emp.departmentId)?.name})</option>
+                ))}
+              </select>
+              <input
+                type="text"
+                placeholder="Значение (например, 9-18 или Д)"
+                value={fillValue}
+                onChange={e => setFillValue(e.target.value)}
+              />
+              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 15 }}>
+                <button className="primary" onClick={handleFillMonth}>Заполнить</button>
+                <button className="secondary" onClick={() => setShowFillModal(false)}>Отмена</button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
-
-      {showRequests && canEdit() && (
-        <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 8 }}>
-          <h4>Запросы на изменение графика</h4>
-          {requests.length === 0 ? <p>Нет запросов</p> : (
-            requests.map(req => (
-              <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
-                <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
-                <ul>
-                  {req.proposedShifts.map((shift, idx) => {
-                    const user = users.find(u => u.id === shift.userId);
-                    return <li key={`${req.id}_${idx}`}>{user?.fullName} – {shift.date}: {shift.oldValue} → {shift.newValue}</li>;
-                  })}
-                </ul>
-                <button className="success" onClick={() => handleApproveRequest(req)}>✅ Одобрить</button>
-                <button className="danger" onClick={() => handleRejectRequest(req)}>❌ Отклонить</button>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {showOvertimeRequests && canEdit() && (
-        <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 8 }}>
-          <h4>Запросы на переработку</h4>
-          {overtimeRequests.length === 0 ? <p>Нет запросов</p> : (
-            overtimeRequests.map(req => (
-              <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
-                <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
-                <p><strong>Дата:</strong> {req.shiftDate}</p>
-                <p><strong>Текущее значение:</strong> {req.originalValue}</p>
-                <p><strong>Переработка:</strong> +{req.overtimeHours} ч.</p>
-                <p><strong>Новое значение:</strong> {req.originalValue}+{req.overtimeHours}</p>
-                <button className="success" onClick={() => handleApproveOvertime(req)}>✅ Одобрить</button>
-                <button className="danger" onClick={() => handleRejectOvertime(req)}>❌ Отклонить</button>
-              </div>
-            ))
-          )}
-        </div>
-      )}
-
-      {renderTable()}
-
-      <ImportModal
-        isOpen={showImportModal}
-        onClose={() => setShowImportModal(false)}
-        onImport={handleImportData}
-        title="Графика смен"
-        expectedColumns={['Сотрудник', 'Дата', 'Значение']}
-        requiredColumns={['Сотрудник', 'Дата', 'Значение']}
-        sampleTemplate={`Сотрудник,Дата,Значение\nИванов Иван,2025-04-01,Д\nПетрова Анна,2025-04-01,9-18`}
-      />
     </div>
   );
 }

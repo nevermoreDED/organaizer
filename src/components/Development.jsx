@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getContracts, addContract, updateContract, deleteContract, getExpiringContracts } from '../services/dataService';
+import { getContracts, addContract, updateContract, deleteContract, getExpiringContracts, addLog } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
 const statuses = [
@@ -17,13 +17,11 @@ const getAutoStatus = (contract) => {
   today.setHours(0, 0, 0, 0);
   const endDate = new Date(contract.endDate);
   endDate.setHours(0, 0, 0, 0);
-  if (endDate < today && contract.status !== 'expired') {
-    return 'expired';
-  }
+  if (endDate < today && contract.status !== 'expired') return 'expired';
   return contract.status;
 };
 
-export default function Development({ userId, departmentId }) {
+export default function Development({ userId, departmentId, currentUser }) {
   const [contracts, setContracts] = useState([]);
   const [loading, setLoading] = useState(false);
   const [showModal, setShowModal] = useState(false);
@@ -72,14 +70,14 @@ export default function Development({ userId, departmentId }) {
         today.setHours(0, 0, 0, 0);
         const endDate = new Date(dataToSave.endDate);
         endDate.setHours(0, 0, 0, 0);
-        if (endDate < today) {
-          dataToSave.status = 'expired';
-        }
+        if (endDate < today) dataToSave.status = 'expired';
       }
       if (currentContract.id) {
         await updateContract(currentContract.id, dataToSave);
+        await addLog(currentUser.id, currentUser.fullName, 'Редактирование договора', currentContract.title);
       } else {
         await addContract({ ...dataToSave, userId });
+        await addLog(currentUser.id, currentUser.fullName, 'Создание договора', currentContract.title);
       }
       setShowModal(false);
       loadData();
@@ -88,9 +86,10 @@ export default function Development({ userId, departmentId }) {
     }
   };
 
-  const handleDelete = async (id) => {
+  const handleDelete = async (contract) => {
     if (window.confirm('Удалить договор?')) {
-      await deleteContract(id);
+      await deleteContract(contract.id);
+      await addLog(currentUser.id, currentUser.fullName, 'Удаление договора', contract.title);
       loadData();
     }
   };
@@ -116,34 +115,24 @@ export default function Development({ userId, departmentId }) {
   if (loading) return <LoadingSpinner />;
 
   return (
-    <div className="card">
+    <div className="restricted-card">
       <h2>📄 Развитие – Договорная работа</h2>
-
       {expiring.length > 0 && (
         <div style={{ background: 'rgba(255,193,7,0.2)', borderLeft: '4px solid #ffc107', padding: 12, marginBottom: 20, borderRadius: 8 }}>
           <strong>⚠️ Внимание!</strong> У следующих договоров истекает срок в ближайшие 30 дней:
           <ul>
-            {expiring.map(c => (
-              <li key={c.id}>{c.title} – {c.counterparty} (до {c.endDate})</li>
-            ))}
+            {expiring.map(c => <li key={c.id}>{c.title} – {c.counterparty} (до {c.endDate})</li>)}
           </ul>
         </div>
       )}
-
       <div style={{ marginBottom: 15, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
         <select value={filterStatus} onChange={e => setFilterStatus(e.target.value)}>
           <option value="">Все статусы</option>
           {statuses.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
         </select>
-        <input
-          type="text"
-          placeholder="Поиск по контрагенту"
-          value={filterCounterparty}
-          onChange={e => setFilterCounterparty(e.target.value)}
-        />
+        <input type="text" placeholder="Поиск по контрагенту" value={filterCounterparty} onChange={e => setFilterCounterparty(e.target.value)} />
         <button className="primary" onClick={() => openEdit()}>➕ Добавить договор</button>
       </div>
-
       <div style={{ overflowX: 'auto' }}>
         <table style={{ width: '100%', borderCollapse: 'collapse' }}>
           <thead>
@@ -163,14 +152,13 @@ export default function Development({ userId, departmentId }) {
                 </td>
                 <td>
                   <button className="secondary" onClick={() => openEdit(c)}>✏️</button>
-                  <button className="danger" onClick={() => handleDelete(c.id)}>🗑️</button>
+                  <button className="danger" onClick={() => handleDelete(c)}>🗑️</button>
                 </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
-
       {showModal && (
         <div className="modal-overlay">
           <div className="modal-content">

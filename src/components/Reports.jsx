@@ -1,6 +1,6 @@
 import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { saveReport, getReports, getAllReports, getUserById, getUsersByDepartment } from '../services/dataService';
+import { saveReport, getReports, getAllReports, getUserById, addLog } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
 const departments = [
@@ -10,8 +10,8 @@ const departments = [
   { id: 'dept5', name: 'Качество' }
 ];
 
-export default function Reports({ userId, currentUserRole, currentUserDepartmentId }) {
-  const [currentUser, setCurrentUser] = useState(null);
+export default function Reports({ userId, currentUserRole, currentUserDepartmentId, currentUser }) {
+  const [currentUserObj, setCurrentUserObj] = useState(null);
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [allowDateEdit, setAllowDateEdit] = useState(false);
   const [orders, setOrders] = useState('');
@@ -34,7 +34,7 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
   useEffect(() => {
     const loadUser = async () => {
       const user = await getUserById(userId);
-      setCurrentUser(user);
+      setCurrentUserObj(user);
     };
     loadUser();
   }, [userId]);
@@ -59,7 +59,6 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
       if (currentUserRole === 'admin' || currentUserRole === 'it') {
         reports = await getAllReports(filterStart || null, filterEnd || null);
       } else {
-        // Руководитель отдела
         const all = await getAllReports(filterStart || null, filterEnd || null);
         const deptUsers = await getUsersByDepartment(currentUserDepartmentId);
         const userIds = deptUsers.map(u => u.id);
@@ -91,7 +90,7 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!date || !orders || !requests || !transferred || !calls || !incoming || !closed) {
-      alert('Заполните все обязательные поля (Заказы, Запросы, Передано, Прозвоны, Входящие, Закрыто)');
+      alert('Заполните все обязательные поля');
       return;
     }
     await saveReport(userId, {
@@ -105,8 +104,9 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
       foundDriver: foundDriver ? parseInt(foundDriver) : 0,
       notFoundDriver: notFoundDriver ? parseInt(notFoundDriver) : 0,
       comment,
-      departmentName: departments.find(d => d.id === currentUser?.departmentId)?.name || currentUser?.departmentId || ''
+      departmentName: departments.find(d => d.id === currentUserObj?.departmentId)?.name || currentUserObj?.departmentId || ''
     });
+    await addLog(userId, currentUser.fullName, 'Добавление отчёта', `Дата: ${date}, заказы: ${orders}, запросы: ${requests}, ...`);
     setOrders('');
     setRequests('');
     setTransferred('');
@@ -151,12 +151,12 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
   if (loadingMy && myReports.length === 0) return <LoadingSpinner />;
 
   return (
-    <div className="card">
+    <div className="restricted-card">
       <h2>📊 Личные отчёты</h2>
       <form onSubmit={handleSubmit} style={{ marginBottom: 20 }}>
         <div style={{ display: 'flex', gap: 20, flexWrap: 'wrap', marginBottom: 10 }}>
-          <div><strong>Сотрудник:</strong> {currentUser?.fullName || 'Загрузка...'}</div>
-          <div><strong>Отдел:</strong> {departments.find(d => d.id === currentUser?.departmentId)?.name || currentUser?.departmentId || '—'}</div>
+          <div><strong>Сотрудник:</strong> {currentUserObj?.fullName || 'Загрузка...'}</div>
+          <div><strong>Отдел:</strong> {departments.find(d => d.id === currentUserObj?.departmentId)?.name || currentUserObj?.departmentId || '—'}</div>
         </div>
         <div style={{ display: 'flex', gap: 10, alignItems: 'center', marginBottom: 15 }}>
           <label>

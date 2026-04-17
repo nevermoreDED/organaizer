@@ -1,18 +1,9 @@
 import { useState, useEffect } from 'react';
-import { getAssignmentsReceived, getAssignmentsGiven, createAssignment, updateAssignment } from '../services/dataService';
+import { 
+  getAssignmentsReceived, getAssignmentsGiven, createAssignment, updateAssignment,
+  getUniqueDepartments, getAllUsers
+} from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-
-const departments = [
-  { id: 'dept1', name: 'Логистика' },
-  { id: 'dept2', name: 'IT' },
-  { id: 'dept3', name: 'Бухгалтерия' },
-];
-
-const users = [
-  { id: 'user1', name: 'Анна', departmentId: 'dept1' },
-  { id: 'user2', name: 'Иван', departmentId: 'dept2' },
-  { id: 'user3', name: 'Ольга', departmentId: 'dept1' },
-];
 
 const statuses = [
   { value: 'new', label: '🟡 Поставлено', color: '#ffc107' },
@@ -31,10 +22,31 @@ export default function Assignments({ currentUser }) {
     toUserId: '',
     text: '',
     deadline: '',
+    toSpecificUser: false,
   });
   const [commentText, setCommentText] = useState({});
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
+  const [departments, setDepartments] = useState([]);
+  const [users, setUsers] = useState([]);
+  const [usersByDept, setUsersByDept] = useState([]);
+
+  useEffect(() => {
+    loadDepartmentsAndUsers();
+  }, []);
+
+  const loadDepartmentsAndUsers = async () => {
+    try {
+      const [depts, allUsers] = await Promise.all([
+        getUniqueDepartments(),
+        getAllUsers()
+      ]);
+      setDepartments(depts);
+      setUsers(allUsers.filter(u => u.role !== 'admin'));
+    } catch (err) {
+      console.error(err);
+    }
+  };
 
   const loadAssignments = async () => {
     setLoading(true);
@@ -57,6 +69,15 @@ export default function Assignments({ currentUser }) {
     if (currentUser) loadAssignments();
   }, [currentUser]);
 
+  useEffect(() => {
+    if (newAssignment.toDepartmentId) {
+      const filtered = users.filter(u => u.departmentId === newAssignment.toDepartmentId);
+      setUsersByDept(filtered);
+    } else {
+      setUsersByDept([]);
+    }
+  }, [newAssignment.toDepartmentId, users]);
+
   const handleCreate = async (e) => {
     e.preventDefault();
     if (!newAssignment.text) return;
@@ -64,13 +85,19 @@ export default function Assignments({ currentUser }) {
       await createAssignment({
         fromUserId: currentUser.id,
         toDepartmentId: newAssignment.toDepartmentId,
-        toUserId: newAssignment.toUserId || null,
+        toUserId: newAssignment.toSpecificUser && newAssignment.toUserId ? newAssignment.toUserId : null,
         text: newAssignment.text,
         deadline: newAssignment.deadline || null,
         status: 'new',
       });
       setShowCreateForm(false);
-      setNewAssignment({ toDepartmentId: '', toUserId: '', text: '', deadline: '' });
+      setNewAssignment({ 
+        toDepartmentId: '', 
+        toUserId: '', 
+        text: '', 
+        deadline: '', 
+        toSpecificUser: false 
+      });
       loadAssignments();
     } catch (err) {
       setError('Ошибка создания поручения');
@@ -106,10 +133,10 @@ export default function Assignments({ currentUser }) {
     return (
       <div key={a.id} style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, marginBottom: 12, background: 'rgba(255,255,255,0.05)' }}>
         <div><strong>Текст:</strong> {a.text}</div>
-        <div><strong>Отдел:</strong> {dept?.name}</div>
-        {a.toUserId && <div><strong>Исполнитель:</strong> {toUser?.name}</div>}
-        {isReceived && <div><strong>От кого:</strong> {fromUser?.name}</div>}
-        {!isReceived && <div><strong>Кому:</strong> {toUser?.name || dept?.name}</div>}
+        <div><strong>Отдел:</strong> {dept?.name || a.toDepartmentId}</div>
+        {a.toUserId && <div><strong>Исполнитель:</strong> {toUser?.fullName || a.toUserId}</div>}
+        {isReceived && <div><strong>От кого:</strong> {fromUser?.fullName}</div>}
+        {!isReceived && <div><strong>Кому:</strong> {toUser?.fullName || dept?.name}</div>}
         {a.deadline && <div><strong>Срок:</strong> {a.deadline}</div>}
         <div><strong>Статус:</strong> 
           {isReceived ? (
@@ -164,15 +191,37 @@ export default function Assignments({ currentUser }) {
                 <option value="">Выберите отдел</option>
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
+              
+              {/* Чекбокс для выбора конкретного сотрудника */}
               {newAssignment.toDepartmentId && (
-                <select value={newAssignment.toUserId} onChange={e => setNewAssignment({...newAssignment, toUserId: e.target.value})}>
-                  <option value="">(Весь отдел)</option>
-                  {users.filter(u => u.departmentId === newAssignment.toDepartmentId).map(u => <option key={u.id} value={u.id}>{u.name}</option>)}
-                </select>
+                <div style={{ marginTop: 10 }}>
+                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+                    <input
+                      type="checkbox"
+                      checked={newAssignment.toSpecificUser}
+                      onChange={e => setNewAssignment({...newAssignment, toSpecificUser: e.target.checked, toUserId: ''})}
+                    />
+                    Конкретному сотруднику
+                  </label>
+                  {newAssignment.toSpecificUser && (
+                    <select 
+                      value={newAssignment.toUserId} 
+                      onChange={e => setNewAssignment({...newAssignment, toUserId: e.target.value})}
+                      style={{ marginTop: 8 }}
+                    >
+                      <option value="">Выберите сотрудника</option>
+                      {usersByDept.map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                    </select>
+                  )}
+                </div>
               )}
-              <textarea placeholder="Текст поручения" required value={newAssignment.text} onChange={e => setNewAssignment({...newAssignment, text: e.target.value})} rows={2} style={{ width: '100%' }} />
-              <input type="date" value={newAssignment.deadline} onChange={e => setNewAssignment({...newAssignment, deadline: e.target.value})} />
-              <div><button className="primary" type="submit">Создать</button> <button className="secondary" type="button" onClick={() => setShowCreateForm(false)}>Отмена</button></div>
+              
+              <textarea placeholder="Текст поручения" required value={newAssignment.text} onChange={e => setNewAssignment({...newAssignment, text: e.target.value})} rows={2} style={{ width: '100%', marginTop: 10 }} />
+              <input type="date" placeholder="Срок" value={newAssignment.deadline} onChange={e => setNewAssignment({...newAssignment, deadline: e.target.value})} style={{ marginTop: 10 }} />
+              <div style={{ marginTop: 15, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
+                <button className="primary" type="submit">Создать</button>
+                <button className="secondary" type="button" onClick={() => setShowCreateForm(false)}>Отмена</button>
+              </div>
             </form>
           )}
           <div>{given.length === 0 ? <p>Нет исходящих поручений</p> : given.map(a => renderCard(a, 'given'))}</div>

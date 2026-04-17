@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { getUserByLogin } from '../services/dataService';
+import { getUserByLogin, addLog } from '../services/dataService';
 
 export default function Login({ onLogin }) {
   const [login, setLogin] = useState('');
@@ -17,6 +17,8 @@ export default function Login({ onLogin }) {
         setError('Неверный логин или пароль');
         return;
       }
+      // Логируем вход
+      await addLog(user.id, user.fullName, 'Вход в систему', `Логин: ${user.login}`);
       onLogin(user);
     } catch (err) {
       setError('Ошибка входа');
@@ -26,15 +28,15 @@ export default function Login({ onLogin }) {
   };
 
   return (
-    <div className="card" style={{ maxWidth: 420, margin: '100px auto' }}>
-      <h2 style={{ textAlign: 'center' }}>Органайзер CRM</h2>
+    <div className="restricted-card" style={{ maxWidth: 400, margin: '100px auto' }}>
+      <h2>Органайзер CRM</h2>
       <form onSubmit={handleSubmit}>
-        <input type="text" placeholder="Логин" value={login} onChange={e => setLogin(e.target.value)} required style={{ marginBottom: 16 }} />
-        <input type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} required style={{ marginBottom: 24 }} />
-        <button type="submit" className="primary" disabled={loading} style={{ width: '100%' }}>
+        <input type="text" placeholder="Логин" value={login} onChange={e => setLogin(e.target.value)} required />
+        <input type="password" placeholder="Пароль" value={password} onChange={e => setPassword(e.target.value)} required style={{ marginTop: 12 }} />
+        <button className="primary" type="submit" disabled={loading} style={{ width: '100%', marginTop: 16 }}>
           {loading ? 'Вход...' : 'Войти'}
         </button>
-        {error && <p style={{ color: '#ff9999', marginTop: 16 }}>{error}</p>}
+        {error && <p style={{ color: 'var(--color-danger)', marginTop: 12 }}>{error}</p>}
       </form>
     </div>
   );

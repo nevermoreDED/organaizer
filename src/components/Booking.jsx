@@ -1,29 +1,20 @@
 import { useState, useEffect } from 'react';
 import {
-  getChecklists, addChecklist, updateChecklist, deleteChecklist,
-  getNotebook, addNote, deleteNote, updateNote
+  getChecklists, addChecklist, updateChecklist, deleteChecklist, addLog
 } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
-export default function Booking({ userId }) {
+export default function Booking({ userId, currentUser }) {
   const [activeTab, setActiveTab] = useState('checklists');
   const [loading, setLoading] = useState(false);
   const [checklists, setChecklists] = useState([]);
-  const [notebook, setNotebook] = useState({ notes: [] });
   const [newChecklistTitle, setNewChecklistTitle] = useState('');
-  const [newNoteTitle, setNewNoteTitle] = useState('');
-  const [newNoteBody, setNewNoteBody] = useState('');
-  const [viewingNote, setViewingNote] = useState(null);
 
-  const loadData = async () => {
+  const loadChecklists = async () => {
     setLoading(true);
     try {
-      const [lists, noteBook] = await Promise.all([
-        getChecklists(userId),
-        getNotebook(userId)
-      ]);
+      const lists = await getChecklists(userId);
       setChecklists(lists);
-      setNotebook(noteBook);
     } catch (err) {
       console.error(err);
     } finally {
@@ -32,14 +23,19 @@ export default function Booking({ userId }) {
   };
 
   useEffect(() => {
-    loadData();
+    loadChecklists();
   }, [userId]);
 
   const handleAddChecklist = async () => {
-    if (!newChecklistTitle) return;
-    await addChecklist(userId, newChecklistTitle);
-    setNewChecklistTitle('');
-    loadData();
+    if (!newChecklistTitle.trim()) return;
+    try {
+      const newList = await addChecklist(userId, newChecklistTitle);
+      setChecklists(prev => [...prev, newList]);
+      setNewChecklistTitle('');
+      await addLog(currentUser.id, currentUser.fullName, 'Создание чек-листа', newChecklistTitle);
+    } catch (err) {
+      console.error(err);
+    }
   };
 
   const toggleChecklistItem = async (checklistId, itemIndex) => {
@@ -47,7 +43,11 @@ export default function Booking({ userId }) {
     const updatedItems = [...checklist.items];
     updatedItems[itemIndex].done = !updatedItems[itemIndex].done;
     await updateChecklist(checklistId, updatedItems);
-    loadData();
+    setChecklists(prev => prev.map(c => 
+      c.id === checklistId ? { ...c, items: updatedItems } : c
+    ));
+    const action = updatedItems[itemIndex].done ? 'Выполнение пункта чек-листа' : 'Отмена выполнения пункта чек-листа';
+    await addLog(currentUser.id, currentUser.fullName, action, `${checklist.title}: ${updatedItems[itemIndex].text}`);
   };
 
   const addChecklistItem = async (checklistId) => {
@@ -56,45 +56,28 @@ export default function Booking({ userId }) {
     const checklist = checklists.find(c => c.id === checklistId);
     const updatedItems = [...(checklist.items || []), { text, done: false }];
     await updateChecklist(checklistId, updatedItems);
-    loadData();
+    setChecklists(prev => prev.map(c => 
+      c.id === checklistId ? { ...c, items: updatedItems } : c
+    ));
+    await addLog(currentUser.id, currentUser.fullName, 'Добавление пункта чек-листа', `${checklist.title}: ${text}`);
   };
 
   const deleteChecklist = async (id) => {
     if (window.confirm('Удалить чек-лист?')) {
+      const checklist = checklists.find(c => c.id === id);
       await deleteChecklist(id);
-      loadData();
+      setChecklists(prev => prev.filter(c => c.id !== id));
+      await addLog(currentUser.id, currentUser.fullName, 'Удаление чек-листа', checklist.title);
     }
   };
 
-  const handleAddNote = async () => {
-    if (!newNoteTitle.trim()) return;
-    await addNote(userId, { title: newNoteTitle.trim(), body: newNoteBody.trim() });
-    setNewNoteTitle('');
-    setNewNoteBody('');
-    loadData();
-  };
-
-  const handleDeleteNote = async (noteId) => {
-    if (window.confirm('Удалить заметку?')) {
-      await deleteNote(userId, noteId);
-      loadData();
-    }
-  };
-
-  const handleUpdateNote = async (noteId, newTitle, newBody) => {
-    await updateNote(userId, noteId, newTitle, newBody);
-    setViewingNote(null);
-    loadData();
-  };
-
-  if (loading) return <LoadingSpinner />;
+  if (loading && checklists.length === 0) return <LoadingSpinner />;
 
   return (
-    <div className="card">
+    <div className="restricted-card">
       <h2>🏨 Бронирование</h2>
       <div style={{ display: 'flex', gap: 10, borderBottom: '1px solid var(--border-light)', marginBottom: 20, flexWrap: 'wrap' }}>
         <button className={activeTab === 'checklists' ? 'primary' : 'secondary'} onClick={() => setActiveTab('checklists')}>Чек-листы</button>
-        <button className={activeTab === 'notebook' ? 'primary' : 'secondary'} onClick={() => setActiveTab('notebook')}>Записная книжка</button>
         <button className={activeTab === 'calculator' ? 'primary' : 'secondary'} onClick={() => setActiveTab('calculator')}>Калькулятор</button>
         <button className={activeTab === 'sounds' ? 'primary' : 'secondary'} onClick={() => setActiveTab('sounds')}>Звуковые кнопки</button>
       </div>
@@ -125,24 +108,6 @@ export default function Booking({ userId }) {
         </div>
       )}
 
-      {activeTab === 'notebook' && (
-        <div>
-          <h3>📓 Записная книжка</h3>
-          <div style={{ marginBottom: 15 }}>
-            <input type="text" placeholder="Заголовок заметки" value={newNoteTitle} onChange={e => setNewNoteTitle(e.target.value)} style={{ width: '70%', marginRight: 10 }} />
-            <button className="primary" onClick={handleAddNote}>➕ Добавить</button>
-          </div>
-          <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
-            {notebook.notes.map(note => (
-              <li key={note.id} style={{ marginBottom: 8, borderBottom: '1px solid var(--border-light)', padding: 8, cursor: 'pointer' }} onClick={() => setViewingNote(note)}>
-                <strong>{note.title}</strong> <small>({new Date(note.createdAt).toLocaleDateString()})</small>
-                <button className="danger" onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} style={{ float: 'right' }}>🗑️</button>
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
       {activeTab === 'calculator' && (
         <div>
           <h3>🧮 Калькулятор</h3>
@@ -157,20 +122,7 @@ export default function Booking({ userId }) {
             <button className="primary" onClick={() => { const audio = new Audio('/meow.mp3'); audio.play(); }}>🐱 Котик мяукает</button>
             <button className="primary" onClick={() => { const audio = new Audio('/beep.mp3'); audio.play(); }}>🚗 Машина бибикает</button>
           </div>
-        </div>
-      )}
-
-      {viewingNote && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ width: 500 }}>
-            <h3>Редактирование заметки</h3>
-            <input type="text" value={viewingNote.title} onChange={e => setViewingNote({ ...viewingNote, title: e.target.value })} style={{ fontSize: '1.2rem', fontWeight: 'bold' }} />
-            <textarea value={viewingNote.body} onChange={e => setViewingNote({ ...viewingNote, body: e.target.value })} rows={10} placeholder="Текст заметки..." />
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-              <button className="primary" onClick={() => handleUpdateNote(viewingNote.id, viewingNote.title, viewingNote.body)}>Сохранить</button>
-              <button className="secondary" onClick={() => setViewingNote(null)}>Отмена</button>
-            </div>
-          </div>
+          <p style={{ fontSize: 12, marginTop: 10 }}>Примечание: звуковые файлы (meow.mp3, beep.mp3) нужно положить в папку public/ вашего проекта.</p>
         </div>
       )}
     </div>

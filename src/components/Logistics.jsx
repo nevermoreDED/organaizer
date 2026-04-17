@@ -5,14 +5,15 @@ import {
   getPaymentPlan, addPaymentPlanItem, updatePaymentPlanItem, deletePaymentPlanItem,
   setPrepayment, getPhotosByDriver, addPhoto, deletePhoto,
   getDrivers, addDriver, deleteDriver, updateDriver,
-  getCustomers, addCustomer, deleteCustomer
+  getCustomers, addCustomer, deleteCustomer,
+  addLog
 } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 import FinanceStats from './FinanceStats';
 import PrepaymentsList from './PrepaymentsList';
 import ImportModal from './ImportModal';
 
-export default function Logistics({ userId }) {
+export default function Logistics({ userId, currentUser }) {
   const [activeTab, setActiveTab] = useState('finance');
   const [payments, setPayments] = useState([]);
   const [plan, setPlan] = useState([]);
@@ -33,8 +34,6 @@ export default function Logistics({ userId }) {
   const [newPrepayment, setNewPrepayment] = useState({ orderId: '', amount: '', status: 'no' });
   const [showImportDrivers, setShowImportDrivers] = useState(false);
   const [showImportCustomers, setShowImportCustomers] = useState(false);
-
-  // Фильтры и поиск для исполнителей
   const [filterCity, setFilterCity] = useState('');
   const [filterCategory, setFilterCategory] = useState('');
   const [filterActive, setFilterActive] = useState('');
@@ -42,8 +41,6 @@ export default function Logistics({ userId }) {
   const [uniqueCities, setUniqueCities] = useState([]);
   const [uniqueCategories, setUniqueCategories] = useState([]);
   const [uniqueActive, setUniqueActive] = useState([]);
-
-  // Редактирование исполнителя
   const [editingDriver, setEditingDriver] = useState(null);
   const [showEditModal, setShowEditModal] = useState(false);
   const [editForm, setEditForm] = useState({ name: '', contact: '', email: '', city: '', category: '', active: true });
@@ -59,10 +56,8 @@ export default function Logistics({ userId }) {
 
   const loadDrivers = async () => {
     const data = await getDrivers(userId);
-    // Гарантируем, что name – строка (защита от undefined)
     const sanitized = data.map(d => ({ ...d, name: d.name || '' }));
     setDrivers(sanitized);
-    // Уникальные значения для фильтров
     const cities = [...new Set(sanitized.map(d => d.city).filter(Boolean))];
     const categories = [...new Set(sanitized.map(d => d.category).filter(Boolean))];
     const actives = [...new Set(sanitized.map(d => (d.active ? 'Активен' : 'Не активен')).filter(Boolean))];
@@ -115,7 +110,6 @@ export default function Logistics({ userId }) {
     if (activeTab === 'photo') loadPhotos();
   }, [activeTab, selectedDriver]);
 
-  // ===================== ФИНАНСЫ =====================
   const handleAddPayment = async () => {
     if (!newPayment.driverId || !newPayment.amount) return;
     const driver = drivers.find(d => d.id === newPayment.driverId);
@@ -127,6 +121,7 @@ export default function Logistics({ userId }) {
       date: newPayment.date,
       status: 'waiting'
     });
+    await addLog(currentUser.id, currentUser.fullName, 'Добавление оплаты', `Исполнитель ${driver.name}, сумма ${newPayment.amount}`);
     setShowPaymentModal(false);
     setNewPayment({ driverId: '', amount: '', date: new Date().toISOString().split('T')[0] });
     loadFinance();
@@ -154,6 +149,7 @@ export default function Logistics({ userId }) {
       dueDate: newPlanItem.dueDate,
       status: 'planned'
     });
+    await addLog(currentUser.id, currentUser.fullName, 'Добавление планового платежа', `${newPlanItem.description}, ${newPlanItem.amount} руб.`);
     setShowPlanModal(false);
     setNewPlanItem({ description: '', amount: '', dueDate: '' });
     loadFinance();
@@ -174,12 +170,12 @@ export default function Logistics({ userId }) {
   const handleAddPrepayment = async () => {
     if (!newPrepayment.orderId || !newPrepayment.amount) return;
     await setPrepayment(userId, newPrepayment.orderId, newPrepayment.status, parseFloat(newPrepayment.amount));
+    await addLog(currentUser.id, currentUser.fullName, 'Добавление предоплаты', `Заказ ${newPrepayment.orderId}, ${newPrepayment.amount} руб.`);
     setShowPrepaymentModal(false);
     setNewPrepayment({ orderId: '', amount: '', status: 'no' });
     loadFinance();
   };
 
-  // ===================== ФОТОКОНТРОЛЬ =====================
   const handleFileChange = (e) => {
     const file = e.target.files[0];
     if (file) {
@@ -211,7 +207,6 @@ export default function Logistics({ userId }) {
     }
   };
 
-  // ===================== ИСПОЛНИТЕЛИ =====================
   const handleAddDriver = async () => {
     if (!newDriverName.trim()) return;
     await addDriver(userId, {
@@ -222,24 +217,16 @@ export default function Logistics({ userId }) {
       category: '',
       active: true
     });
+    await addLog(currentUser.id, currentUser.fullName, 'Добавление исполнителя', newDriverName.trim());
     setNewDriverName('');
     await loadDrivers();
   };
 
-  const handleDeleteDriver = async (id) => {
+  const handleDeleteDriver = async (driver) => {
     if (window.confirm('Удалить исполнителя?')) {
-      await deleteDriver(id);
+      await deleteDriver(driver.id);
+      await addLog(currentUser.id, currentUser.fullName, 'Удаление исполнителя', driver.name);
       await loadDrivers();
-    }
-  };
-
-  const handleDeleteAllDrivers = async () => {
-    if (window.confirm('⚠️ ВНИМАНИЕ! Вы уверены, что хотите удалить ВСЕХ исполнителей? Это действие необратимо.')) {
-      for (const driver of drivers) {
-        await deleteDriver(driver.id);
-      }
-      await loadDrivers();
-      alert('Все исполнители удалены');
     }
   };
 
@@ -266,13 +253,33 @@ export default function Logistics({ userId }) {
       category: editForm.category,
       active: editForm.active
     });
+    await addLog(currentUser.id, currentUser.fullName, 'Редактирование исполнителя', editForm.name);
     setShowEditModal(false);
     setEditingDriver(null);
     await loadDrivers();
     alert('Данные исполнителя обновлены');
   };
 
-  const exportDrivers = () => {
+  const handleAddCustomer = async () => {
+    if (!newCustomerName.trim()) return;
+    await addCustomer(userId, {
+      name: newCustomerName.trim(),
+      contact: ''
+    });
+    await addLog(currentUser.id, currentUser.fullName, 'Добавление заказчика', newCustomerName.trim());
+    setNewCustomerName('');
+    await loadCustomers();
+  };
+
+  const handleDeleteCustomer = async (customer) => {
+    if (window.confirm('Удалить заказчика?')) {
+      await deleteCustomer(customer.id);
+      await addLog(currentUser.id, currentUser.fullName, 'Удаление заказчика', customer.name);
+      await loadCustomers();
+    }
+  };
+
+  const exportDrivers = async () => {
     const data = drivers.map(d => ({
       'Имя': d.name,
       'Контакты': d.contact || '',
@@ -285,6 +292,7 @@ export default function Logistics({ userId }) {
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Исполнители');
     XLSX.writeFile(wb, 'drivers.xlsx');
+    await addLog(currentUser.id, currentUser.fullName, 'Экспорт исполнителей', `Экспортировано ${drivers.length} записей`);
   };
 
   const handleImportDrivers = async (rows) => {
@@ -305,42 +313,17 @@ export default function Logistics({ userId }) {
       }
     }
     await loadDrivers();
+    await addLog(currentUser.id, currentUser.fullName, 'Импорт исполнителей', `Импортировано ${rows.length} записей`);
     alert('Импорт исполнителей завершён');
   };
 
-  // Фильтрация и поиск (исправлено: проверка на строку)
-  const filteredDrivers = drivers.filter(d => {
-    if (filterCity && d.city !== filterCity) return false;
-    if (filterCategory && d.category !== filterCategory) return false;
-    if (filterActive && ((filterActive === 'Активен' && !d.active) || (filterActive === 'Не активен' && d.active))) return false;
-    if (searchName && (!d.name || typeof d.name !== 'string' || !d.name.toLowerCase().includes(searchName.toLowerCase()))) return false;
-    return true;
-  });
-
-  // ===================== ЗАКАЗЧИКИ =====================
-  const handleAddCustomer = async () => {
-    if (!newCustomerName.trim()) return;
-    await addCustomer(userId, {
-      name: newCustomerName.trim(),
-      contact: ''
-    });
-    setNewCustomerName('');
-    await loadCustomers();
-  };
-
-  const handleDeleteCustomer = async (id) => {
-    if (window.confirm('Удалить заказчика?')) {
-      await deleteCustomer(id);
-      await loadCustomers();
-    }
-  };
-
-  const exportCustomers = () => {
+  const exportCustomers = async () => {
     const data = customers.map(c => ({ 'Имя': c.name, 'Контакты': c.contact || '' }));
     const ws = XLSX.utils.json_to_sheet(data);
     const wb = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(wb, ws, 'Заказчики');
     XLSX.writeFile(wb, 'customers.xlsx');
+    await addLog(currentUser.id, currentUser.fullName, 'Экспорт заказчиков', `Экспортировано ${customers.length} записей`);
   };
 
   const handleImportCustomers = async (rows) => {
@@ -353,14 +336,23 @@ export default function Logistics({ userId }) {
       }
     }
     await loadCustomers();
+    await addLog(currentUser.id, currentUser.fullName, 'Импорт заказчиков', `Импортировано ${rows.length} записей`);
     alert('Импорт заказчиков завершён');
   };
 
+  const filteredDrivers = drivers.filter(d => {
+    if (filterCity && d.city !== filterCity) return false;
+    if (filterCategory && d.category !== filterCategory) return false;
+    if (filterActive && ((filterActive === 'Активен' && !d.active) || (filterActive === 'Не активен' && d.active))) return false;
+    if (searchName && (!d.name || typeof d.name !== 'string' || !d.name.toLowerCase().includes(searchName.toLowerCase()))) return false;
+    return true;
+  });
+
   if (loading) return <LoadingSpinner />;
-  if (error) return <div className="card" style={{ color: '#ff9999' }}>{error}</div>;
+  if (error) return <div className="restricted-card" style={{ color: '#ff9999' }}>{error}</div>;
 
   return (
-    <div className="card">
+    <div className="restricted-card">
       <h2>🚛 Логистика</h2>
       <FinanceStats userId={userId} />
 
@@ -454,12 +446,11 @@ export default function Logistics({ userId }) {
           <div style={{ display: 'flex', gap: 10, marginBottom: 15, flexWrap: 'wrap', alignItems: 'center' }}>
             <button className="secondary" onClick={exportDrivers}>📎 Экспорт</button>
             <button className="secondary" onClick={() => setShowImportDrivers(true)}>📂 Импорт</button>
-            <button className="danger" onClick={handleDeleteAllDrivers}>🗑️ Удалить всех</button>
+            <button className="danger" onClick={() => handleDeleteDriver(selectedDriverObj)}>🗑️ Удалить всех</button>
             <input placeholder="Имя исполнителя" value={newDriverName} onChange={e => setNewDriverName(e.target.value)} />
             <button className="primary" onClick={handleAddDriver}>➕ Добавить</button>
           </div>
 
-          {/* Поиск и фильтры */}
           <div style={{ display: 'flex', gap: 10, marginBottom: 15, flexWrap: 'wrap' }}>
             <input type="text" placeholder="🔍 Поиск по имени" value={searchName} onChange={e => setSearchName(e.target.value)} style={{ width: '200px' }} />
             <select value={filterCity} onChange={e => setFilterCity(e.target.value)}>
@@ -491,7 +482,7 @@ export default function Logistics({ userId }) {
                   <td>{d.active ? 'Активен' : 'Не активен'}</td>
                   <td>
                     <button className="secondary" onClick={() => openEditDriver(d)}>✏️</button>
-                    <button className="danger" onClick={() => handleDeleteDriver(d.id)}>🗑️</button>
+                    <button className="danger" onClick={() => handleDeleteDriver(d)}>🗑️</button>
                   </td>
                 </tr>
               ))}
@@ -516,7 +507,10 @@ export default function Logistics({ userId }) {
                 <tr key={c.id}>
                   <td>{c.name}</td>
                   <td>{c.contact || ''}</td>
-                  <td><button className="danger" onClick={() => handleDeleteCustomer(c.id)}>🗑️</button></td>
+                  <td>
+                    <button className="secondary" onClick={() => openEditCustomer(c)}>✏️</button>
+                    <button className="danger" onClick={() => handleDeleteCustomer(c)}>🗑️</button>
+                  </td>
                 </tr>
               ))}
             </tbody>
@@ -524,7 +518,6 @@ export default function Logistics({ userId }) {
         </div>
       )}
 
-      {/* Модальное окно редактирования исполнителя */}
       {showEditModal && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '500px' }}>
@@ -549,7 +542,6 @@ export default function Logistics({ userId }) {
         </div>
       )}
 
-      {/* Модальные окна для финансов */}
       {showPaymentModal && (
         <div className="modal-overlay">
           <div className="modal-content">
