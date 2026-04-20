@@ -103,9 +103,36 @@ export default function NotesSidebar({ userId }) {
         </div>
         <ul style={{ listStyle: 'none', paddingLeft: 0, margin: 0 }}>
           {notebook.notes.map(note => (
-            <li key={note.id} style={{ marginBottom: '8px', borderBottom: '1px solid var(--border-light)', padding: '8px', cursor: 'pointer' }} onClick={() => setViewingNote(note)}>
-              <strong>{note.title}</strong> <small>({new Date(note.createdAt).toLocaleDateString()})</small>
-              <button className="danger" onClick={(e) => { e.stopPropagation(); handleDeleteNote(note.id); }} style={{ float: 'right' }}>🗑️</button>
+            <li
+              key={note.id}
+              style={{
+                marginBottom: '8px',
+                borderBottom: '1px solid var(--border-light)',
+                padding: '8px',
+                cursor: 'pointer',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                gap: '8px'
+              }}
+              onClick={() => setViewingNote(note)}
+            >
+              <div style={{ flex: 1, overflow: 'hidden' }}>
+                <strong>{note.title}</strong>
+                <small style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {new Date(note.createdAt).toLocaleDateString()}
+                </small>
+              </div>
+              <button
+                className="danger"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleDeleteNote(note.id);
+                }}
+                style={{ flexShrink: 0, padding: '4px 8px', fontSize: '12px' }}
+              >
+                🗑️
+              </button>
             </li>
           ))}
         </ul>

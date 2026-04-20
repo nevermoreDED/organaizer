@@ -24,6 +24,7 @@ import {
 } from '@dnd-kit/sortable';
 import { useSortable } from '@dnd-kit/sortable';
 import { CSS } from '@dnd-kit/utilities';
+import { BiMenu } from 'react-icons/bi';
 
 const departments = [
   { id: 'dept1', name: 'Логистика' },
@@ -35,28 +36,42 @@ const departments = [
 const monthNames = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 const weekDays = ['ПН', 'ВТ', 'СР', 'ЧТ', 'ПТ', 'СБ', 'ВС'];
 
-const SortableRow = ({ user, children, isEditing }) => {
-  const {
-    attributes,
-    listeners,
-    setNodeRef,
-    transform,
-    transition,
-    isDragging,
-  } = useSortable({ id: user.id });
-
+// Компонент строки с перетаскиванием (без листенеров на всей строке)
+const SortableRow = ({ user, children }) => {
+  const { setNodeRef, transform, transition, isDragging } = useSortable({ id: user.id });
   const style = {
     transform: CSS.Transform.toString(transform),
     transition,
     opacity: isDragging ? 0.5 : 1,
-    cursor: isEditing ? 'grab' : 'default',
   };
+  return <tr ref={setNodeRef} style={style}>{children}</tr>;
+};
 
+// Ячейка-ручка перетаскивания
+const DragHandle = ({ user }) => {
+  const { attributes, listeners } = useSortable({ id: user.id });
   return (
-    <tr ref={setNodeRef} style={style} {...(isEditing ? attributes : {})} {...(isEditing ? listeners : {})}>
-      {children}
-    </tr>
+    <td style={{ border: '1px solid var(--border-light, #ddd)', padding: '8px', textAlign: 'center', verticalAlign: 'middle', cursor: 'grab' }} {...attributes} {...listeners}>
+      <BiMenu size={18} />
+    </td>
   );
+};
+
+// Стили
+const tdStyle = {
+  border: '1px solid var(--border-light, #ddd)',
+  padding: '8px',
+  textAlign: 'center',
+  fontSize: '0.7rem',
+  whiteSpace: 'nowrap'
+};
+const thStyle = {
+  border: '1px solid var(--border-light, #ddd)',
+  padding: '8px',
+  textAlign: 'center',
+  fontWeight: 'bold',
+  fontSize: '0.7rem',
+  whiteSpace: 'nowrap'
 };
 
 export default function Schedule({ currentUser }) {
@@ -83,10 +98,8 @@ export default function Schedule({ currentUser }) {
   const [fillEmployeesList, setFillEmployeesList] = useState([]);
 
   const sensors = useSensors(
-    useSensor(PointerSensor),
-    useSensor(KeyboardSensor, {
-      coordinateGetter: sortableKeyboardCoordinates,
-    })
+    useSensor(PointerSensor, { activationConstraint: { distance: 5 } }),
+    useSensor(KeyboardSensor, { coordinateGetter: sortableKeyboardCoordinates })
   );
 
   const canEdit = () => currentUser.role === 'manager' || currentUser.role === 'admin' || currentUser.isIT === true;
@@ -115,9 +128,9 @@ export default function Schedule({ currentUser }) {
       setShifts(shiftsMap);
       const filteredUsers = allUsers.filter(u => u.role !== 'admin' && u.departmentId !== 'dept2');
       const sorted = filteredUsers.sort((a, b) => {
-        const indexA = departments.findIndex(d => d.id === a.departmentId);
-        const indexB = departments.findIndex(d => d.id === b.departmentId);
-        if (indexA !== indexB) return indexA - indexB;
+        const idxA = departments.findIndex(d => d.id === a.departmentId);
+        const idxB = departments.findIndex(d => d.id === b.departmentId);
+        if (idxA !== idxB) return idxA - idxB;
         const orderA = a.order !== undefined ? a.order : 9999;
         const orderB = b.order !== undefined ? b.order : 9999;
         if (orderA !== orderB) return orderA - orderB;
@@ -136,7 +149,8 @@ export default function Schedule({ currentUser }) {
   const loadWorkingNow = async () => {
     try {
       const allUsers = await getAllUsers();
-      const yearMonthNow = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2, '0')}`;
+      const now = new Date();
+      const yearMonthNow = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`;
       const shiftsData = await getShiftsByMonth(yearMonthNow);
       const shiftsMap = {};
       shiftsData.forEach(s => { shiftsMap[`${s.userId}_${s.date}`] = s.value; });
@@ -148,24 +162,16 @@ export default function Schedule({ currentUser }) {
       for (const u of allUsers) {
         if (u.role === 'admin' || u.departmentId === 'dept2') continue;
         const shiftValue = shiftsMap[`${u.id}_${today}`];
-        if (shiftValue) {
-          const match = shiftValue.match(/(\d{1,2})-(\d{1,2})/);
-          if (match) {
-            let start = parseInt(match[1]);
-            let end = parseInt(match[2]);
-            if (end < start) end += 24;
-            const currentMinutes = currentHour * 60 + currentMinute;
-            const startMinutes = start * 60;
-            const endMinutes = end * 60;
-            if (currentMinutes >= startMinutes && currentMinutes <= endMinutes) {
-              working.push(u.fullName);
-            }
-          } else if (shiftValue === 'Д') {
-            if (currentHour >= 7 && currentHour < 19) working.push(u.fullName);
-          } else if (shiftValue === 'Н') {
-            if (currentHour >= 19 || currentHour < 7) working.push(u.fullName);
-          }
-        }
+        if (!shiftValue) continue;
+        const match = shiftValue.match(/(\d{1,2})-(\d{1,2})/);
+        if (match) {
+          let start = parseInt(match[1]);
+          let end = parseInt(match[2]);
+          if (end < start) end += 24;
+          const currentMinutes = currentHour * 60 + currentMinute;
+          if (currentMinutes >= start * 60 && currentMinutes <= end * 60) working.push(u.fullName);
+        } else if (shiftValue === 'Д' && currentHour >= 7 && currentHour < 19) working.push(u.fullName);
+        else if (shiftValue === 'Н' && (currentHour >= 19 || currentHour < 7)) working.push(u.fullName);
       }
       setWorkingNow(working);
     } catch (err) {
@@ -183,8 +189,8 @@ export default function Schedule({ currentUser }) {
   const getDaysInMonth = (year, month) => new Date(year, month + 1, 0).getDate();
   const isWeekend = (year, month, day) => {
     const date = new Date(year, month, day);
-    const dayOfWeek = date.getDay();
-    return dayOfWeek === 0 || dayOfWeek === 6;
+    const dow = date.getDay();
+    return dow === 0 || dow === 6;
   };
   const getWeekdayForDate = (year, month, day) => {
     const date = new Date(year, month, day);
@@ -207,18 +213,13 @@ export default function Schedule({ currentUser }) {
     if (canEdit()) {
       setEditedShifts(prev => ({ ...prev, [`${userId}_${date}`]: newValue }));
     } else {
-      const existingIndex = pendingChanges.findIndex(pc => pc.userId === userId && pc.date === date);
-      if (existingIndex !== -1) {
+      const existing = pendingChanges.findIndex(pc => pc.userId === userId && pc.date === date);
+      if (existing !== -1) {
         const updated = [...pendingChanges];
-        updated[existingIndex].newValue = newValue;
+        updated[existing].newValue = newValue;
         setPendingChanges(updated);
       } else {
-        setPendingChanges([...pendingChanges, {
-          userId,
-          date,
-          newValue,
-          oldValue: shifts[`${userId}_${date}`] || ''
-        }]);
+        setPendingChanges([...pendingChanges, { userId, date, newValue, oldValue: shifts[`${userId}_${date}`] || '' }]);
       }
     }
     setEditingCell(null);
@@ -229,9 +230,9 @@ export default function Schedule({ currentUser }) {
     if (entries.length === 0) return;
     setSaving(true);
     try {
-      const updates = entries.map(([key, value]) => {
-        const [userId, date] = key.split('_');
-        return { userId, date, value };
+      const updates = entries.map(([key, val]) => {
+        const [uid, date] = key.split('_');
+        return { userId: uid, date, value: val };
       });
       await saveShiftsBatch(currentUser.id, updates);
       await addLog(currentUser.id, currentUser.fullName, 'Сохранение графика', `Месяц: ${yearMonth}, изменено ${entries.length} ячеек`);
@@ -254,20 +255,20 @@ export default function Schedule({ currentUser }) {
 
   const sendOvertimeRequest = async () => {
     if (pendingChanges.length === 0) return;
-    const allHavePlus = pendingChanges.every(change => change.newValue.includes('+'));
+    const allHavePlus = pendingChanges.every(c => c.newValue.includes('+'));
     if (!allHavePlus) {
-      alert('Для отправки запроса на переработку все изменения должны содержать символ "+" (например, Д+3, 9-18+2).');
+      alert('Для переработки все изменения должны содержать "+" (например, Д+3)');
       return;
     }
-    for (const change of pendingChanges) {
-      const match = change.newValue.match(/(.+)\+(\d+(?:\.\d+)?)$/);
+    for (const c of pendingChanges) {
+      const match = c.newValue.match(/(.+)\+(\d+(?:\.\d+)?)$/);
       if (match) {
-        await createOvertimeRequest(currentUser.id, change.date, change.oldValue, parseFloat(match[2]), yearMonth);
+        await createOvertimeRequest(currentUser.id, c.date, c.oldValue, parseFloat(match[2]), yearMonth);
       }
     }
-    await addLog(currentUser.id, currentUser.fullName, 'Запрос на переработку', `Месяц: ${yearMonth}, отправлено ${pendingChanges.length} запросов`);
+    await addLog(currentUser.id, currentUser.fullName, 'Запрос на переработку', `Отправлено ${pendingChanges.length} запросов`);
     setPendingChanges([]);
-    alert('Запрос(ы) на переработку отправлены руководителю');
+    alert('Запросы на переработку отправлены руководителю');
   };
 
   const loadRequests = async () => {
@@ -300,9 +301,9 @@ export default function Schedule({ currentUser }) {
   };
 
   const handleApproveOvertime = async (req) => {
-    const currentValue = shifts[`${req.fromUserId}_${req.shiftDate}`] || '';
-    const newValue = `${currentValue}+${req.overtimeHours}`;
-    await setShiftForDate(req.fromUserId, req.shiftDate, newValue);
+    const currentVal = shifts[`${req.fromUserId}_${req.shiftDate}`] || '';
+    const newVal = `${currentVal}+${req.overtimeHours}`;
+    await setShiftForDate(req.fromUserId, req.shiftDate, newVal);
     await updateOvertimeRequest(req.id, 'approved');
     await addLog(currentUser.id, currentUser.fullName, 'Одобрение переработки', `${users.find(u => u.id === req.fromUserId)?.fullName}, +${req.overtimeHours}ч`);
     loadRequests();
@@ -322,11 +323,7 @@ export default function Schedule({ currentUser }) {
       for (const day of monthDays) {
         const date = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const value = shifts[`${user.id}_${date}`] || '';
-        data.push({
-          'Сотрудник': user.fullName,
-          'Дата': date,
-          'Значение': value
-        });
+        data.push({ 'Сотрудник': user.fullName, 'Дата': date, 'Значение': value });
       }
     }
     const ws = XLSX.utils.json_to_sheet(data);
@@ -347,9 +344,7 @@ export default function Schedule({ currentUser }) {
         newShifts[`${user.id}_${date}`] = value;
       }
     }
-    if (Object.keys(newShifts).length === 0) {
-      throw new Error('Не найдено соответствий. Проверьте имена сотрудников и даты.');
-    }
+    if (Object.keys(newShifts).length === 0) throw new Error('Не найдено соответствий. Проверьте имена сотрудников и даты.');
     setEditedShifts(newShifts);
     await addLog(currentUser.id, currentUser.fullName, 'Импорт графика', `Импортировано ${Object.keys(newShifts).length} записей`);
     alert(`Импортировано ${Object.keys(newShifts).length} записей. Нажмите "Сохранить график" для применения.`);
@@ -389,25 +384,25 @@ export default function Schedule({ currentUser }) {
 
   const handleFillMonth = async () => {
     if (!fillEmployeeId || !fillValue) {
-      alert('Выберите сотрудника и укажите значение');
+      alert('Выберите сотрудника и значение');
       return;
     }
-    const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
+    const days = getDaysInMonth(selectedYear, selectedMonth);
     const newShifts = { ...editedShifts };
-    for (let day = 1; day <= daysInMonth; day++) {
+    for (let day = 1; day <= days; day++) {
       const date = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
-      const isWeekendDay = isWeekend(selectedYear, selectedMonth, day);
-      if (!isWeekendDay) {
+      if (!isWeekend(selectedYear, selectedMonth, day)) {
         newShifts[`${fillEmployeeId}_${date}`] = fillValue;
       }
     }
     setEditedShifts(newShifts);
     setShowFillModal(false);
-    alert(`Для выбранного сотрудника заполнены будние дни значением "${fillValue}". Не забудьте сохранить график.`);
+    alert(`Будние дни заполнены значением "${fillValue}". Не забудьте сохранить график.`);
   };
 
   const daysInMonth = getDaysInMonth(selectedYear, selectedMonth);
   const monthDays = Array.from({ length: daysInMonth }, (_, i) => i + 1);
+  const totalCols = monthDays.length + 2; // иконка + имя + дни
 
   const borderColor = isLightTheme ? 'rgba(0,0,0,0.08)' : 'rgba(255,255,255,0.03)';
   const monthBg = isLightTheme ? '#A2C5E5' : 'rgba(162,197,229,0.12)';
@@ -417,51 +412,29 @@ export default function Schedule({ currentUser }) {
   const defaultCellBg = isLightTheme ? 'rgba(214,235,206,0.2)' : 'rgba(214,235,206,0.03)';
   const textColor = isLightTheme ? '#000' : 'var(--text-primary)';
 
-  const thStyle = {
-    border: `1px solid ${borderColor}`,
-    padding: '8px',
-    backgroundColor: weekdayBg,
-    color: textColor,
-    textAlign: 'center',
-    fontWeight: 'bold',
-    fontSize: '0.7rem',
-    whiteSpace: 'nowrap'
-  };
-  const tdStyle = {
-    border: `1px solid ${borderColor}`,
-    padding: '8px',
-    textAlign: 'center',
-    fontSize: '0.7rem',
-    whiteSpace: 'nowrap'
-  };
-
   const renderTable = () => {
-    // Строка с названием месяца (будет в начале)
+    // Строка месяца
     const monthRow = (
       <tr key="month">
-        <td colSpan={monthDays.length + 1} style={{ backgroundColor: monthBg, color: textColor, padding: '4px', textAlign: 'center', border: `1px solid ${borderColor}`, fontWeight: 'bold' }}>
+        <td colSpan={totalCols} style={{ backgroundColor: monthBg, color: textColor, padding: '4px', textAlign: 'center', border: `1px solid ${borderColor}`, fontWeight: 'bold' }}>
           {monthNames[selectedMonth]} {selectedYear}
         </td>
       </tr>
     );
 
-    // Шапка для дней недели (первая ячейка пустая)
+    // Заголовки дней недели – теперь ровно столько же колонок, сколько в теле
     const weekdaysRow = (
       <tr key="weekdays">
-        <th style={thStyle}></th>
-        {monthDays.map(day => (
-          <th key={`wd_${day}`} style={thStyle}>{getWeekdayForDate(selectedYear, selectedMonth, day)}</th>
-        ))}
+        <th style={thStyle}> </th>
+        <th style={thStyle}> </th>
+        {monthDays.map(day => <th key={`wd_${day}`} style={thStyle}>{getWeekdayForDate(selectedYear, selectedMonth, day)}</th>)}
       </tr>
     );
-
-    // Шапка для дат (первая ячейка пустая)
     const datesRow = (
       <tr key="dates">
-        <th style={thStyle}></th>
-        {monthDays.map(day => (
-          <th key={`dt_${day}`} style={thStyle}>{day}</th>
-        ))}
+        <th style={thStyle}> </th>
+        <th style={thStyle}> </th>
+        {monthDays.map(day => <th key={`dt_${day}`} style={thStyle}>{day}</th>)}
       </tr>
     );
 
@@ -474,12 +447,11 @@ export default function Schedule({ currentUser }) {
         currentDept = deptName;
         bodyRows.push(
           <tr key={`dept_${deptName}`}>
-            <td colSpan={monthDays.length + 1} style={{ backgroundColor: deptBg, color: textColor, fontWeight: 'bold', padding: '4px', border: `1px solid ${borderColor}`, textAlign: 'center' }}>
+            <td colSpan={totalCols} style={{ backgroundColor: deptBg, color: textColor, fontWeight: 'bold', padding: '4px', border: `1px solid ${borderColor}`, textAlign: 'center' }}>
               {deptName}
             </td>
           </tr>
         );
-        // Добавляем строки с днями недели и датами после названия отдела
         bodyRows.push(weekdaysRow);
         bodyRows.push(datesRow);
       }
@@ -488,15 +460,11 @@ export default function Schedule({ currentUser }) {
         const date = `${selectedYear}-${String(selectedMonth + 1).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
         const isWeekendDay = isWeekend(selectedYear, selectedMonth, day);
         const value = getCellValue(user.id, date);
-        const isEditing = editingCell && editingCell.userId === user.id && editingCell.date === date;
+        const isEditing = editingCell?.userId === user.id && editingCell?.date === date;
         return (
           <td
             key={`cell_${user.id}_${date}`}
-            style={{
-              ...tdStyle,
-              backgroundColor: isWeekendDay ? weekendBg : defaultCellBg,
-              cursor: 'pointer'
-            }}
+            style={{ ...tdStyle, backgroundColor: isWeekendDay ? weekendBg : defaultCellBg, cursor: 'pointer' }}
             onClick={() => {
               if (isEditing) return;
               setEditingCell({ userId: user.id, date });
@@ -507,23 +475,18 @@ export default function Schedule({ currentUser }) {
                 type="text"
                 defaultValue={value}
                 autoFocus
-                onBlur={(e) => handleCellEdit(user.id, date, e.target.value)}
-                onKeyPress={(e) => {
-                  if (e.key === 'Enter') {
-                    handleCellEdit(user.id, date, e.target.value);
-                  }
-                }}
+                onBlur={e => handleCellEdit(user.id, date, e.target.value)}
+                onKeyPress={e => { if (e.key === 'Enter') handleCellEdit(user.id, date, e.target.value); }}
                 style={{ width: '100%', textAlign: 'center', background: 'var(--bg-card)', color: 'var(--text-primary)', border: `1px solid ${borderColor}`, borderRadius: '4px', fontSize: '0.65rem', padding: '2px' }}
               />
-            ) : (
-              value || ''
-            )}
+            ) : value || ''}
           </td>
         );
       });
 
       bodyRows.push(
-        <SortableRow key={user.id} user={user} isEditing={canEdit()}>
+        <SortableRow key={user.id} user={user}>
+          {canEdit() ? <DragHandle user={user} /> : <td style={tdStyle} />}
           <td style={{ ...tdStyle, fontWeight: 'bold', background: 'rgba(255,255,255,0.05)' }}>{user.fullName}</td>
           {cells}
         </SortableRow>
@@ -531,22 +494,11 @@ export default function Schedule({ currentUser }) {
     }
 
     return (
-      <DndContext
-        sensors={sensors}
-        collisionDetection={closestCenter}
-        onDragEnd={handleDragEnd}
-      >
-        <SortableContext
-          items={sortedUsers.map(u => u.id)}
-          strategy={verticalListSortingStrategy}
-        >
+      <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+        <SortableContext items={sortedUsers.map(u => u.id)} strategy={verticalListSortingStrategy}>
           <table style={{ width: 'max-content', borderCollapse: 'collapse' }}>
-            <thead>
-              {monthRow}
-            </thead>
-            <tbody>
-              {bodyRows}
-            </tbody>
+            <thead>{monthRow}</thead>
+            <tbody>{bodyRows}</tbody>
         </table>
         </SortableContext>
       </DndContext>
@@ -562,11 +514,7 @@ export default function Schedule({ currentUser }) {
     <div style={{ textAlign: 'center' }}>
       <div className="card" style={{ display: 'inline-block', padding: '20px', width: 'max-content', boxSizing: 'border-box', textAlign: 'left' }}>
         <h2>⏰ Сейчас работают (Новосибирск)</h2>
-        {workingNow.length === 0 ? <p>Никто не работает в данный момент</p> : (
-          <ul>
-            {workingNow.map(name => <li key={name}>{name}</li>)}
-          </ul>
-        )}
+        {workingNow.length === 0 ? <p>Никто не работает в данный момент</p> : <ul>{workingNow.map(name => <li key={name}>{name}</li>)}</ul>}
 
         <h2 style={{ marginTop: '20px' }}>📅 График смен</h2>
         <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap', marginBottom: 16, alignItems: 'center' }}>
@@ -583,9 +531,7 @@ export default function Schedule({ currentUser }) {
               <button className="secondary" onClick={() => setShowImportModal(true)}>📂 Импорт</button>
               <button className="secondary" onClick={openFillModal}>📋 Заполнить 5/2</button>
               {hasEditedShifts && (
-                <button className="primary" onClick={saveAllChanges} disabled={saving}>
-                  {saving ? 'Сохранение...' : '💾 Сохранить'}
-                </button>
+                <button className="primary" onClick={saveAllChanges} disabled={saving}>{saving ? 'Сохранение...' : '💾 Сохранить'}</button>
               )}
             </>
           )}
@@ -612,40 +558,36 @@ export default function Schedule({ currentUser }) {
         {showRequests && canEdit() && (
           <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 8 }}>
             <h4>Запросы на изменение графика</h4>
-            {requests.length === 0 ? <p>Нет запросов</p> : (
-              requests.map(req => (
-                <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
-                  <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
-                  <ul>
-                    {req.proposedShifts.map((shift, idx) => {
-                      const user = users.find(u => u.id === shift.userId);
-                      return <li key={`${req.id}_${idx}`}>{user?.fullName} – {shift.date}: {shift.oldValue} → {shift.newValue}</li>;
-                    })}
-                  </ul>
-                  <button className="success" onClick={() => handleApproveRequest(req)}>✅ Одобрить</button>
-                  <button className="danger" onClick={() => handleRejectRequest(req)}>❌ Отклонить</button>
-                </div>
-              ))
-            )}
+            {requests.length === 0 ? <p>Нет запросов</p> : requests.map(req => (
+              <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
+                <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
+                <ul>
+                  {req.proposedShifts.map((shift, idx) => {
+                    const u = users.find(uu => uu.id === shift.userId);
+                    return <li key={`${req.id}_${idx}`}>{u?.fullName} – {shift.date}: {shift.oldValue} → {shift.newValue}</li>;
+                  })}
+                </ul>
+                <button className="success" onClick={() => handleApproveRequest(req)}>✅ Одобрить</button>
+                <button className="danger" onClick={() => handleRejectRequest(req)}>❌ Отклонить</button>
+              </div>
+            ))}
           </div>
         )}
 
         {showOvertimeRequests && canEdit() && (
           <div style={{ marginBottom: 16, background: 'rgba(255,255,255,0.05)', padding: 8, borderRadius: 8 }}>
             <h4>Запросы на переработку</h4>
-            {overtimeRequests.length === 0 ? <p>Нет запросов</p> : (
-              overtimeRequests.map(req => (
-                <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
-                  <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
-                  <p><strong>Дата:</strong> {req.shiftDate}</p>
-                  <p><strong>Текущее значение:</strong> {req.originalValue}</p>
-                  <p><strong>Переработка:</strong> +{req.overtimeHours} ч.</p>
-                  <p><strong>Новое значение:</strong> {req.originalValue}+{req.overtimeHours}</p>
-                  <button className="success" onClick={() => handleApproveOvertime(req)}>✅ Одобрить</button>
-                  <button className="danger" onClick={() => handleRejectOvertime(req)}>❌ Отклонить</button>
-                </div>
-              ))
-            )}
+            {overtimeRequests.length === 0 ? <p>Нет запросов</p> : overtimeRequests.map(req => (
+              <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
+                <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
+                <p><strong>Дата:</strong> {req.shiftDate}</p>
+                <p><strong>Текущее значение:</strong> {req.originalValue}</p>
+                <p><strong>Переработка:</strong> +{req.overtimeHours} ч.</p>
+                <p><strong>Новое значение:</strong> {req.originalValue}+{req.overtimeHours}</p>
+                <button className="success" onClick={() => handleApproveOvertime(req)}>✅ Одобрить</button>
+                <button className="danger" onClick={() => handleRejectOvertime(req)}>❌ Отклонить</button>
+              </div>
+            ))}
           </div>
         )}
 
@@ -664,19 +606,14 @@ export default function Schedule({ currentUser }) {
         {showFillModal && (
           <div className="modal-overlay">
             <div className="modal-content">
-              <h3>Заполнить будние дни по шаблону 5/2</h3>
+              <h3>Заполнить будние дни</h3>
               <select value={fillEmployeeId} onChange={e => setFillEmployeeId(e.target.value)}>
                 <option value="">Выберите сотрудника</option>
                 {fillEmployeesList.map(emp => (
                   <option key={emp.id} value={emp.id}>{emp.fullName} ({departments.find(d => d.id === emp.departmentId)?.name})</option>
                 ))}
               </select>
-              <input
-                type="text"
-                placeholder="Значение (например, 9-18 или Д)"
-                value={fillValue}
-                onChange={e => setFillValue(e.target.value)}
-              />
+              <input type="text" placeholder="Значение (например, 9-18 или Д)" value={fillValue} onChange={e => setFillValue(e.target.value)} />
               <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 15 }}>
                 <button className="primary" onClick={handleFillMonth}>Заполнить</button>
                 <button className="secondary" onClick={() => setShowFillModal(false)}>Отмена</button>

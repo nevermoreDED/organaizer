@@ -12,7 +12,26 @@ export default function AttentionBlock({ userId, departmentId }) {
     setLoading(true);
     try {
       const data = await getAttentionBlock(userId, departmentId);
-      setAttention(data);
+      // Дополнительная клиентская фильтрация на случай, если в БД статус не обновился
+      const today = new Date().toISOString().split('T')[0];
+      const filteredOverdueTasks = (data.overdueTasks || []).filter(t => 
+        t.status !== 'done' && t.dueDate && t.dueDate < today
+      );
+      const filteredTodayTasks = (data.todayTasks || []).filter(t => 
+        t.status !== 'done' && t.dueDate === today
+      );
+      const filteredOverdueAssignments = (data.overdueAssignments || []).filter(a => 
+        a.status !== 'done'
+      );
+      const filteredTodayAssignments = (data.todayAssignments || []).filter(a => 
+        a.status !== 'done'
+      );
+      setAttention({
+        overdueTasks: filteredOverdueTasks,
+        todayTasks: filteredTodayTasks,
+        overdueAssignments: filteredOverdueAssignments,
+        todayAssignments: filteredTodayAssignments,
+      });
     } catch (err) {
       setError('Не удалось загрузить блок внимания');
     } finally {
@@ -22,8 +41,17 @@ export default function AttentionBlock({ userId, departmentId }) {
 
   useEffect(() => {
     loadAttention();
-    const interval = setInterval(loadAttention, 30000);
-    return () => clearInterval(interval);
+    const interval = setInterval(loadAttention, 15000); // каждые 15 секунд
+
+    const handleUpdate = () => loadAttention();
+    window.addEventListener('tasks-updated', handleUpdate);
+    window.addEventListener('assignments-updated', handleUpdate);
+
+    return () => {
+      clearInterval(interval);
+      window.removeEventListener('tasks-updated', handleUpdate);
+      window.removeEventListener('assignments-updated', handleUpdate);
+    };
   }, [userId, departmentId]);
 
   if (loading) return <LoadingSpinner />;

@@ -17,9 +17,7 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
 
   const formatDateTimeLocal = (dateStr) => {
     if (!dateStr) return '';
-    if (dateStr.includes('T')) {
-      return dateStr.slice(0, 16);
-    }
+    if (dateStr.includes('T')) return dateStr.slice(0, 16);
     return `${dateStr}T12:00`;
   };
 
@@ -30,7 +28,8 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
         start: '',
         end: '',
         comment: '',
-        allDay: true
+        allDay: true,
+        status: 'active'
       });
       setItemType('task');
       setHasEndDate(false);
@@ -52,11 +51,8 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
         end: ev.endDatetime || undefined,
         extendedProps: { type: 'event', originalId: ev.id, comment: ev.comment || '' }
       }));
-      const allEvents = [...formattedEvents, ...taskEvents];
-      setEvents(allEvents);
-      if (calendarRef.current) {
-        calendarRef.current.getApi().refetchEvents();
-      }
+      setEvents([...formattedEvents, ...taskEvents]);
+      if (calendarRef.current) calendarRef.current.getApi().refetchEvents();
     } catch (err) {
       console.error('Ошибка загрузки:', err);
     } finally {
@@ -86,7 +82,8 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
       start: start,
       end: selectInfo.endStr,
       comment: '',
-      allDay: selectInfo.allDay
+      allDay: selectInfo.allDay,
+      status: 'active'
     });
     setHasEndDate(false);
     setShowModal(true);
@@ -100,7 +97,7 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
         title: clickInfo.event.title,
         start: clickInfo.event.startStr,
         comment: ext.comment,
-        status: ext.status
+        status: ext.status || 'active'
       });
       setItemType('task');
       setHasEndDate(false);
@@ -127,15 +124,21 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
           alert('Выберите дату задачи');
           return;
         }
+        const taskStatus = currentItem.status || 'active';
         if (currentItem.id) {
-          await updateTask(currentItem.id, { title: currentItem.title, dueDate, comment: currentItem.comment });
+          await updateTask(currentItem.id, { 
+            title: currentItem.title, 
+            dueDate, 
+            comment: currentItem.comment,
+            status: taskStatus
+          });
         } else {
           await addTask({
             userId,
             title: currentItem.title,
             dueDate,
             comment: currentItem.comment,
-            status: 'active'
+            status: taskStatus
           });
         }
         window.dispatchEvent(new Event('tasks-updated'));
@@ -149,9 +152,7 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
           datetime: currentItem.start,
           comment: currentItem.comment
         };
-        if (hasEndDate && currentItem.end) {
-          eventData.endDatetime = currentItem.end;
-        }
+        if (hasEndDate && currentItem.end) eventData.endDatetime = currentItem.end;
         if (currentItem.id) {
           await updateEvent(currentItem.id, eventData);
         } else {
@@ -169,16 +170,26 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
   const deleteItem = async () => {
     if (!window.confirm('Удалить?')) return;
     try {
-      if (itemType === 'task') {
-        await deleteTask(currentItem.id);
-      } else {
-        await deleteEvent(currentItem.id);
-      }
+      if (itemType === 'task') await deleteTask(currentItem.id);
+      else await deleteEvent(currentItem.id);
       window.dispatchEvent(new Event('tasks-updated'));
       setShowModal(false);
       await loadAllEvents();
     } catch (err) {
       console.error('Ошибка удаления:', err);
+    }
+  };
+
+  const toggleTaskStatus = async () => {
+    if (itemType !== 'task' || !currentItem.id) return;
+    const newStatus = currentItem.status === 'done' ? 'active' : 'done';
+    try {
+      await updateTask(currentItem.id, { status: newStatus });
+      setCurrentItem({ ...currentItem, status: newStatus });
+      window.dispatchEvent(new Event('tasks-updated'));
+      await loadAllEvents();
+    } catch (err) {
+      console.error('Ошибка изменения статуса:', err);
     }
   };
 
@@ -204,91 +215,54 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
         locale="ru"
         firstDay={1}
         timeZone={timezone}
-        buttonText={{
-          today: 'Сегодня',
-          month: 'Месяц',
-          week: 'Неделя',
-          day: 'День'
-        }}
+        buttonText={{ today: 'Сегодня', month: 'Месяц', week: 'Неделя', day: 'День' }}
       />
 
       {showModal && (
         <div style={modalOverlayStyle}>
           <div style={modalContentStyle}>
-            <h3 style={{ marginTop: 0 }}>{currentItem?.id ? 'Редактировать' : 'Создать'}</h3>
-            <div style={{ marginBottom: 15, display: 'flex', gap: '15px', alignItems: 'center' }}>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                <input type="radio" value="task" checked={itemType === 'task'} onChange={() => setItemType('task')} />
-                <span>Задача</span>
-              </label>
-              <label style={{ display: 'inline-flex', alignItems: 'center', gap: '5px' }}>
-                <input type="radio" value="event" checked={itemType === 'event'} onChange={() => setItemType('event')} />
-                <span>Событие</span>
-              </label>
+            <h3>{currentItem?.id ? 'Редактировать' : 'Создать'}</h3>
+            <div style={{ marginBottom: 15, display: 'flex', gap: 15 }}>
+              <label><input type="radio" value="task" checked={itemType === 'task'} onChange={() => setItemType('task')} /> Задача</label>
+              <label><input type="radio" value="event" checked={itemType === 'event'} onChange={() => setItemType('event')} /> Событие</label>
             </div>
-            <input
-              type="text"
-              placeholder="Название"
-              value={currentItem.title}
-              onChange={e => setCurrentItem({...currentItem, title: e.target.value})}
-              style={{ width: '100%', marginBottom: 12 }}
-            />
+            <input type="text" placeholder="Название" value={currentItem.title} onChange={e => setCurrentItem({...currentItem, title: e.target.value})} style={{ width: '100%', marginBottom: 12 }} />
+            
             {itemType === 'task' ? (
-              <div style={{ marginBottom: 12 }}>
-                <label>Дата:</label>
-                <input
-                  type="date"
-                  value={currentItem.start ? currentItem.start.split('T')[0] : ''}
-                  onChange={e => setCurrentItem({...currentItem, start: e.target.value})}
-                  style={{ width: '100%' }}
-                />
-              </div>
+              <>
+                <div style={{ marginBottom: 12 }}>
+                  <label>Дата:</label>
+                  <input type="date" value={currentItem.start?.split('T')[0] || ''} onChange={e => setCurrentItem({...currentItem, start: e.target.value})} style={{ width: '100%' }} />
+                </div>
+                {currentItem.id && (
+                  <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <label>Статус:</label>
+                    <button type="button" onClick={toggleTaskStatus} style={{ background: currentItem.status === 'done' ? '#28a745' : '#ffc107', color: 'white', padding: '4px 12px' }}>
+                      {currentItem.status === 'done' ? '✅ Выполнена' : '🟡 Не выполнена'}
+                    </button>
+                  </div>
+                )}
+              </>
             ) : (
               <>
                 <div style={{ marginBottom: 12 }}>
                   <label>Дата и время начала:</label>
-                  <input
-                    type="datetime-local"
-                    value={formatDateTimeLocal(currentItem.start)}
-                    onChange={e => setCurrentItem({...currentItem, start: e.target.value})}
-                    style={{ width: '100%' }}
-                  />
+                  <input type="datetime-local" value={formatDateTimeLocal(currentItem.start)} onChange={e => setCurrentItem({...currentItem, start: e.target.value})} style={{ width: '100%' }} />
                 </div>
                 <div>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 5, marginBottom: 12 }}>
-                    <input
-                      type="checkbox"
-                      checked={hasEndDate}
-                      onChange={e => setHasEndDate(e.target.checked)}
-                    />
-                    Указать дату окончания
-                  </label>
-                  {hasEndDate && (
-                    <input
-                      type="datetime-local"
-                      value={formatDateTimeLocal(currentItem.end)}
-                      onChange={e => setCurrentItem({...currentItem, end: e.target.value})}
-                      style={{ width: '100%', marginBottom: 12 }}
-                    />
-                  )}
+                  <label><input type="checkbox" checked={hasEndDate} onChange={e => setHasEndDate(e.target.checked)} /> Указать дату окончания</label>
+                  {hasEndDate && <input type="datetime-local" value={formatDateTimeLocal(currentItem.end)} onChange={e => setCurrentItem({...currentItem, end: e.target.value})} style={{ width: '100%', marginTop: 8 }} />}
                 </div>
               </>
             )}
-            <textarea
-              placeholder="Комментарий"
-              value={currentItem.comment || ''}
-              onChange={e => setCurrentItem({...currentItem, comment: e.target.value})}
-              rows={3}
-              style={{ width: '100%', marginBottom: 12 }}
-            />
+            
+            <textarea placeholder="Комментарий" value={currentItem.comment || ''} onChange={e => setCurrentItem({...currentItem, comment: e.target.value})} rows={3} style={{ width: '100%', marginBottom: 12 }} />
             <div style={{ display: 'flex', justifyContent: 'space-between' }}>
               <button onClick={saveItem}>Сохранить</button>
               {currentItem.id && <button onClick={deleteItem} style={{ background: '#dc3545', color: 'white' }}>Удалить</button>}
               <button onClick={() => setShowModal(false)}>Отмена</button>
             </div>
-            {itemType === 'task' && (
-              <p style={{ fontSize: 12, marginTop: 10 }}>Если дата не указана, задача не будет отображаться в календаре.</p>
-            )}
+            {itemType === 'task' && <p style={{ fontSize: 12, marginTop: 10 }}>Если дата не указана, задача не будет отображаться в календаре.</p>}
           </div>
         </div>
       )}

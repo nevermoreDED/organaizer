@@ -99,6 +99,7 @@ export default function Assignments({ currentUser }) {
         toSpecificUser: false 
       });
       loadAssignments();
+      window.dispatchEvent(new Event('assignments-updated'));
     } catch (err) {
       setError('Ошибка создания поручения');
     }
@@ -108,6 +109,7 @@ export default function Assignments({ currentUser }) {
     try {
       await updateAssignment(id, { status: newStatus });
       loadAssignments();
+      window.dispatchEvent(new Event('assignments-updated'));
     } catch (err) {
       setError('Ошибка изменения статуса');
     }
@@ -120,6 +122,7 @@ export default function Assignments({ currentUser }) {
       await updateAssignment(id, { comment });
       setCommentText({ ...commentText, [id]: '' });
       loadAssignments();
+      window.dispatchEvent(new Event('assignments-updated'));
     } catch (err) {
       setError('Ошибка добавления комментария');
     }
@@ -192,7 +195,6 @@ export default function Assignments({ currentUser }) {
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
               
-              {/* Чекбокс для выбора конкретного сотрудника */}
               {newAssignment.toDepartmentId && (
                 <div style={{ marginTop: 10 }}>
                   <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>

@@ -194,11 +194,22 @@ export const getAttentionBlock = async (userId, departmentId) => {
   const allTasksQuery = query(collection(db, 'tasks'), where('userId', '==', userId));
   const allTasksSnap = await getDocs(allTasksQuery);
   const allTasks = allTasksSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  const overdueTasks = allTasks.filter(t => t.dueDate && t.dueDate < today && t.status !== 'done');
-  const todayTasks = allTasks.filter(t => t.dueDate === today && t.status !== 'done');
+  
+  const overdueTasks = allTasks.filter(t => 
+    t.dueDate && t.dueDate < today && t.status !== 'done'
+  );
+  const todayTasks = allTasks.filter(t => 
+    t.dueDate === today && t.status !== 'done'
+  );
+  
   const received = await getAssignmentsReceived(userId, departmentId);
-  const overdueAssignments = received.filter(a => a.deadline && a.deadline < today && a.status !== 'done');
-  const todayAssignments = received.filter(a => a.deadline === today && a.status !== 'done');
+  const overdueAssignments = received.filter(a => 
+    a.deadline && a.deadline < today && a.status !== 'done'
+  );
+  const todayAssignments = received.filter(a => 
+    a.deadline === today && a.status !== 'done'
+  );
+  
   return { overdueTasks, todayTasks, overdueAssignments, todayAssignments };
 };
 
