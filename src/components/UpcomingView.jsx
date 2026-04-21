@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react';
-import { getTasksByDateRange, getEvents } from '../services/dataService';
+import { getTasksByDateRange, getEvents, updateTask } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
 const periods = [
@@ -35,7 +35,10 @@ export default function UpcomingView({ userId }) {
       end.setMonth(start.getMonth() + 1);
       end.setDate(0);
     }
-    return { start: start.toISOString().split('T')[0], end: end.toISOString().split('T')[0] };
+    const formatLocal = (d) => {
+      return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+    };
+    return { start: formatLocal(start), end: formatLocal(end) };
   };
 
   const loadData = async () => {
@@ -74,9 +77,29 @@ export default function UpcomingView({ userId }) {
     }
   };
 
+  const toggleDone = async (item) => {
+    if (item.type !== 'task') return;
+    try {
+      const newStatus = item.status === 'done' ? 'active' : 'done';
+      await updateTask(item.id, { status: newStatus });
+      await loadData();
+      window.dispatchEvent(new Event('tasks-updated'));
+    } catch (err) {
+      setError('Ошибка изменения статуса');
+    }
+  };
+
   useEffect(() => {
     if (userId) loadData();
   }, [userId, period]);
+
+  useEffect(() => {
+    const handleUpdate = () => {
+      if (userId) loadData();
+    };
+    window.addEventListener('tasks-updated', handleUpdate);
+    return () => window.removeEventListener('tasks-updated', handleUpdate);
+  }, [userId]);
 
   if (loading) return <LoadingSpinner />;
   if (error) return <div className="card" style={{ color: 'var(--color-danger)' }}>{error}</div>;
@@ -100,7 +123,15 @@ export default function UpcomingView({ userId }) {
       <ul style={{ listStyle: 'none', paddingLeft: 0 }}>
         {items.map(item => (
           <li key={`${item.type}_${item.id}`} style={{ marginBottom: 8, display: 'flex', alignItems: 'center', gap: 8, padding: '8px' }}>
-            <span style={{ flex: 1 }}>
+            <span 
+              style={{ 
+                flex: 1, 
+                cursor: item.type === 'task' ? 'pointer' : 'default',
+                textDecoration: item.status === 'done' ? 'line-through' : 'none',
+                color: item.status === 'done' ? 'var(--text-secondary)' : 'var(--text-primary)'
+              }}
+              onClick={() => item.type === 'task' && toggleDone(item)}
+            >
               {item.type === 'task' ? '✅ ' : '🗓️ '}
               {item.title}
               {item.date && <small> ({item.type === 'task' ? 'до ' + item.date : new Date(item.date).toLocaleString()})</small>}

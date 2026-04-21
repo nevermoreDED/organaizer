@@ -9,7 +9,10 @@ export default function TaskList({ userId, filter }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
-  const todayStr = () => new Date().toISOString().split('T')[0];
+  const todayStr = () => {
+    const d = new Date();
+    return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+  };
 
   const loadTasks = async () => {
     if (!userId) return;
@@ -42,6 +45,12 @@ export default function TaskList({ userId, filter }) {
   useEffect(() => {
     loadTasks();
   }, [userId, filter]);
+
+  useEffect(() => {
+    const handleUpdate = () => loadTasks();
+    window.addEventListener('tasks-updated', handleUpdate);
+    return () => window.removeEventListener('tasks-updated', handleUpdate);
+  }, []);
 
   const handleAdd = async () => {
     if (!newTitle.trim()) return;
@@ -126,9 +135,7 @@ export default function TaskList({ userId, filter }) {
               padding: '8px',
               borderRadius: 'var(--radius-sm)',
               backgroundColor: task.isHot ? 'rgba(255, 152, 0, 0.2)' : 'transparent',
-              borderLeft: task.isHot ? '4px solid #ff9800' : 'none',
-              transition: 'all 0.3s ease',
-              animation: task.isHot ? 'flicker 1.5s infinite' : 'none'
+              borderLeft: task.isHot ? '4px solid #ff9800' : 'none'
             }}
           >
             <span
@@ -147,15 +154,6 @@ export default function TaskList({ userId, filter }) {
           </li>
         ))}
       </ul>
-      <style>
-        {`
-          @keyframes flicker {
-            0% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.2); }
-            50% { box-shadow: 0 0 0 5px rgba(255, 152, 0, 0.4); }
-            100% { box-shadow: 0 0 0 0 rgba(255, 152, 0, 0.2); }
-          }
-        `}
-      </style>
     </div>
   );
 }

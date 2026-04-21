@@ -134,7 +134,7 @@ function App() {
                 <ResourcesPanel />
               </div>
               <div style={{ justifySelf: 'start' }}>
-                <TodayItemsSidebar userId={currentUser.id} onAddClick={handleAddToday} />
+                <TodayItemsSidebar userId={currentUser.id} departmentId={currentUser.departmentId} onAddClick={handleAddToday} />
               </div>
             </div>
           </div>

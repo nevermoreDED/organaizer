@@ -41,14 +41,11 @@ export default function AttentionBlock({ userId, departmentId }) {
 
   useEffect(() => {
     loadAttention();
-    const interval = setInterval(loadAttention, 15000); // каждые 15 секунд
-
     const handleUpdate = () => loadAttention();
     window.addEventListener('tasks-updated', handleUpdate);
     window.addEventListener('assignments-updated', handleUpdate);
 
     return () => {
-      clearInterval(interval);
       window.removeEventListener('tasks-updated', handleUpdate);
       window.removeEventListener('assignments-updated', handleUpdate);
     };
@@ -78,7 +75,7 @@ export default function AttentionBlock({ userId, departmentId }) {
       <h3>🔔 Требует внимания</h3>
       <ul style={{ margin: 0, paddingLeft: '20px' }}>
         {allItems.map((item, idx) => (
-          <li key={idx} style={{ marginBottom: 4, animation: 'flicker 1.5s infinite' }}>
+          <li key={idx} style={{ marginBottom: 4 }}>
             <strong>{item.typeText}:</strong> {item.title || item.text}
           </li>
         ))}
