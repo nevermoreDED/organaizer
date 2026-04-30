@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { createUser, getAllUsers, deleteUser, updateUser, addLog } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
+import { formatDate } from '../utils/dateUtils';
 
 const departments = [
   { id: 'dept1', name: 'Логистика' },
@@ -186,7 +187,7 @@ export default function AdminPanel({ currentUser, onClose }) {
                   <td>{u.fullName}</td>
                   <td>{formatRole(u)}</td>
                   <td>{departments.find(d => d.id === u.departmentId)?.name || u.departmentId}</td>
-                  <td>{u.seniorityStartDate || 'не указана'}</td>
+                   <td>{u.seniorityStartDate ? formatDate(u.seniorityStartDate) : 'не указана'}</td>
                   <td>
                     <button className="secondary" onClick={() => openEditModal(u)}>✏️ Редактировать</button>
                     <button className="danger" onClick={() => handleDelete(u.id, u.login)}>🗑️</button>

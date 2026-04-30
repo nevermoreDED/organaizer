@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getTasksByDateRange, getEvents, updateTask } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
+import { formatDate, formatDateTime } from '../utils/dateUtils';
 
 const periods = [
   { label: 'Сегодня', days: 0 },
@@ -134,7 +135,7 @@ export default function UpcomingView({ userId }) {
             >
               {item.type === 'task' ? '✅ ' : '🗓️ '}
               {item.title}
-              {item.date && <small> ({item.type === 'task' ? 'до ' + item.date : new Date(item.date).toLocaleString()})</small>}
+               {item.date && <small> ({item.type === 'task' ? 'до ' + formatDate(item.date) : formatDateTime(item.date)})</small>}
             </span>
           </li>
         ))}

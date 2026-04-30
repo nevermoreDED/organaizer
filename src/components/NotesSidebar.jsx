@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react';
 import { getNotebook, addNote, deleteNote, updateNote } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
+import { formatDate } from '../utils/dateUtils';
 
 function AutosizeTextarea({ value, onChange, placeholder }) {
   const textareaRef = useRef(null);
@@ -119,9 +120,9 @@ export default function NotesSidebar({ userId }) {
             >
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 <strong>{note.title}</strong>
-                <small style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                  {new Date(note.createdAt).toLocaleDateString()}
-                </small>
+                 <small style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                   {formatDate(new Date(note.createdAt))}
+                 </small>
               </div>
               <button
                 className="danger"

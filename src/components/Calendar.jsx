@@ -152,7 +152,11 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
           datetime: currentItem.start,
           comment: currentItem.comment
         };
-        if (hasEndDate && currentItem.end) eventData.endDatetime = currentItem.end;
+         if (hasEndDate && currentItem.end) {
+           eventData.endDatetime = currentItem.end;
+         } else {
+           eventData.endDatetime = null;
+         }
         if (currentItem.id) {
           await updateEvent(currentItem.id, eventData);
         } else {
@@ -216,6 +220,13 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
         firstDay={1}
         timeZone={timezone}
         buttonText={{ today: 'Сегодня', month: 'Месяц', week: 'Неделя', day: 'День' }}
+        displayEventTime={true}
+        displayEventEnd={true}
+        eventTimeFormat={{
+          hour: '2-digit',
+          minute: '2-digit',
+          hour12: false
+        }}
       />
 
       {showModal && (
@@ -249,10 +260,10 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
                   <label>Дата и время начала:</label>
                   <input type="datetime-local" value={formatDateTimeLocal(currentItem.start)} onChange={e => setCurrentItem({...currentItem, start: e.target.value})} style={{ width: '100%' }} />
                 </div>
-                <div>
-                  <label><input type="checkbox" checked={hasEndDate} onChange={e => setHasEndDate(e.target.checked)} /> Указать дату окончания</label>
-                  {hasEndDate && <input type="datetime-local" value={formatDateTimeLocal(currentItem.end)} onChange={e => setCurrentItem({...currentItem, end: e.target.value})} style={{ width: '100%', marginTop: 8 }} />}
-                </div>
+                 <div>
+                   <label><input type="checkbox" checked={hasEndDate} onChange={e => { setHasEndDate(e.target.checked); if (!e.target.checked) setCurrentItem({...currentItem, end: ''}); }} /> Указать дату окончания</label>
+                   {hasEndDate && <input type="datetime-local" value={formatDateTimeLocal(currentItem.end)} onChange={e => setCurrentItem({...currentItem, end: e.target.value})} style={{ width: '100%', marginTop: 8 }} />}
+                 </div>
               </>
             )}
             

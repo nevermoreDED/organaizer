@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import { getAllPrepayments, updatePrepayment, getCustomers } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
+import { formatDate } from '../utils/dateUtils';
 
 export default function PrepaymentsList({ userId }) {
   const [prepayments, setPrepayments] = useState([]);
@@ -94,7 +95,7 @@ export default function PrepaymentsList({ userId }) {
                   <option value="yes">Получена</option>
                 </select>
               </td>
-              <td style={{ border: '1px solid #ddd', padding: '8px' }}>{new Date(p.createdAt?.toDate()).toLocaleDateString()}</td>
+               <td style={{ border: '1px solid #ddd', padding: '8px' }}>{formatDate(new Date(p.createdAt?.toDate()))}</td>
               <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
                 <button onClick={() => handleStatusChange(p.id, p.status === 'yes' ? 'no' : 'yes')}>🔄</button>
               </td>

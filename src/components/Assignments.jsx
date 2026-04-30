@@ -4,13 +4,21 @@ import {
   getUniqueDepartments, getAllUsers
 } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
+import { formatDate } from '../utils/dateUtils';
 
-const statuses = [
-  { value: 'new', label: '🟡 Поставлено', color: '#ffc107' },
-  { value: 'in_progress', label: '🔵 В работе', color: '#0d6efd' },
-  { value: 'done', label: '🟢 Выполнено', color: '#198754' },
-  { value: 'no_response', label: '🔴 Нет ответа', color: '#dc3545' },
-];
+const statusColors = {
+  new: '#ffc107',
+  in_progress: '#0d6efd',
+  done: '#198754',
+  no_response: '#dc3545'
+};
+
+const statusLabels = {
+  new: '🟡 Поставено',
+  in_progress: '🔵 В работе',
+  done: '🢞 Выполнено',
+  no_response: '🔴 Нет ответа'
+};
 
 export default function Assignments({ currentUser }) {
   const [activeTab, setActiveTab] = useState('received');
@@ -30,6 +38,10 @@ export default function Assignments({ currentUser }) {
   const [departments, setDepartments] = useState([]);
   const [users, setUsers] = useState([]);
   const [usersByDept, setUsersByDept] = useState([]);
+  const [selectedAssignment, setSelectedAssignment] = useState(null);
+
+  const ITEMS_PER_PAGE = 3;
+  const BUBBLE_HEIGHT = 100;
 
   useEffect(() => {
     loadDepartmentsAndUsers();
@@ -56,8 +68,14 @@ export default function Assignments({ currentUser }) {
         getAssignmentsReceived(currentUser.id, currentUser.departmentId),
         getAssignmentsGiven(currentUser.id),
       ]);
-      setReceived(receivedData);
-      setGiven(givenData);
+      const sortedReceived = receivedData.sort((a, b) => 
+        new Date(b.createdAt?.toDate?.() || b.createdAt || 0) - new Date(a.createdAt?.toDate?.() || a.createdAt || 0)
+      );
+      const sortedGiven = givenData.sort((a, b) => 
+        new Date(b.createdAt?.toDate?.() || b.createdAt || 0) - new Date(a.createdAt?.toDate?.() || a.createdAt || 0)
+      );
+      setReceived(sortedReceived);
+      setGiven(sortedGiven);
     } catch (err) {
       setError('Ошибка загрузки поручений');
     } finally {
@@ -128,41 +146,114 @@ export default function Assignments({ currentUser }) {
     }
   };
 
-  const renderCard = (a, type) => {
+  const truncateText = (text, maxLength = 80) => {
+    if (!text) return '';
+    return text.length > maxLength ? text.slice(0, maxLength) + '...' : text;
+  };
+
+  const renderChatBubble = (a, type) => {
     const isReceived = type === 'received';
     const dept = departments.find(d => d.id === a.toDepartmentId);
     const toUser = users.find(u => u.id === a.toUserId);
     const fromUser = users.find(u => u.id === a.fromUserId);
+    
+    const counterparty = isReceived 
+      ? (fromUser?.fullName || 'Неизвестный')
+      : (toUser?.fullName || dept?.name || 'Неизвестный');
+    
+    const avatar = isReceived ? '📥' : '📤';
+    const bubbleStyle = {
+      display: 'flex',
+      gap: '10px',
+      padding: '12px 16px',
+      marginBottom: '8px',
+      borderRadius: '16px',
+      background: isReceived ? 'rgba(255, 152, 0, 0.1)' : 'rgba(0, 123, 255, 0.1)',
+      border: `1px solid ${isReceived ? 'rgba(255, 152, 0, 0.3)' : 'rgba(0, 123, 255, 0.3)'}`,
+      cursor: 'pointer',
+      transition: 'all 0.2s ease',
+      maxWidth: '100%',
+      alignItems: 'flex-start'
+    };
+
+    const statusColor = statusColors[a.status] || '#6c757d';
+
     return (
-      <div key={a.id} style={{ border: '1px solid var(--border-light)', borderRadius: 12, padding: 12, marginBottom: 12, background: 'rgba(255,255,255,0.05)' }}>
-        <div><strong>Текст:</strong> {a.text}</div>
-        <div><strong>Отдел:</strong> {dept?.name || a.toDepartmentId}</div>
-        {a.toUserId && <div><strong>Исполнитель:</strong> {toUser?.fullName || a.toUserId}</div>}
-        {isReceived && <div><strong>От кого:</strong> {fromUser?.fullName}</div>}
-        {!isReceived && <div><strong>Кому:</strong> {toUser?.fullName || dept?.name}</div>}
-        {a.deadline && <div><strong>Срок:</strong> {a.deadline}</div>}
-        <div><strong>Статус:</strong> 
-          {isReceived ? (
-            <select value={a.status} onChange={(e) => handleStatusChange(a.id, e.target.value)}>
-              {statuses.map(s => <option key={s.value} value={s.value}>{s.label}</option>)}
-            </select>
-          ) : (
-            <span style={{ color: statuses.find(s => s.value === a.status)?.color }}>{statuses.find(s => s.value === a.status)?.label}</span>
-          )}
+      <div 
+        key={a.id} 
+        style={bubbleStyle}
+        onClick={() => setSelectedAssignment({...a, type})}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.transform = 'translateX(3px)';
+          e.currentTarget.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.transform = 'translateX(0)';
+          e.currentTarget.style.boxShadow = 'none';
+        }}
+      >
+        <div style={{ 
+          fontSize: '24px', 
+          flexShrink: 0,
+          marginTop: '2px'
+        }}>
+          {avatar}
         </div>
-        {a.comment && <div><strong>Комментарий:</strong> {a.comment}</div>}
-        {isReceived && (
-          <div style={{ marginTop: 8 }}>
-            <input 
-              type="text" 
-              placeholder="Ваш комментарий..." 
-              value={commentText[a.id] || ''} 
-              onChange={(e) => setCommentText({ ...commentText, [a.id]: e.target.value })}
-              style={{ marginRight: 8 }}
-            />
-            <button className="secondary" onClick={() => handleComment(a.id)}>Отправить</button>
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ 
+            display: 'flex', 
+            justifyContent: 'space-between', 
+            alignItems: 'flex-start',
+            marginBottom: '4px',
+            gap: '8px'
+          }}>
+            <span style={{ 
+              fontWeight: 'bold', 
+              fontSize: '0.9rem',
+              color: 'var(--text-primary)',
+              wordBreak: 'break-word'
+            }}>
+              {counterparty}
+            </span>
+            {!isReceived && (
+              <span style={{ 
+                fontSize: '0.85rem',
+                color: statusColor,
+                fontWeight: '500',
+                flexShrink: 0
+              }}>
+                {statusLabels[a.status]}
+              </span>
+            )}
           </div>
-        )}
+          <div style={{ 
+            fontSize: '0.95rem', 
+            color: 'var(--text-primary)',
+            marginBottom: '6px',
+            lineHeight: '1.4',
+            wordBreak: 'break-word'
+          }}>
+            {truncateText(a.text, 120)}
+          </div>
+          <div style={{ 
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            fontSize: '0.75rem',
+            color: 'var(--text-muted)'
+          }}>
+            <span>{formatDate(a.deadline || a.createdAt?.toDate?.() || a.createdAt || '')}</span>
+            {isReceived && a.status && (
+              <span style={{
+                width: '8px',
+                height: '8px',
+                borderRadius: '50%',
+                background: statusColor,
+                display: 'inline-block'
+              }} />
+            )}
+          </div>
+        </div>
       </div>
     );
   };
@@ -170,65 +261,261 @@ export default function Assignments({ currentUser }) {
   if (loading) return <LoadingSpinner />;
   if (error) return <div className="card" style={{ color: 'var(--color-danger)' }}>{error}</div>;
 
+  const currentList = activeTab === 'received' ? received : given;
+
   return (
-    <div className="card">
-      <h2>📋 Поручения</h2>
-      <div style={{ display: 'flex', gap: 10, borderBottom: '1px solid var(--border-light)', marginBottom: 20 }}>
-        <button className={activeTab === 'received' ? 'primary' : 'secondary'} onClick={() => setActiveTab('received')}>Мне поручили</button>
-        <button className={activeTab === 'given' ? 'primary' : 'secondary'} onClick={() => setActiveTab('given')}>Я поручил</button>
-        {activeTab === 'given' && (
-          <button onClick={() => setShowCreateForm(!showCreateForm)} style={{ marginLeft: 'auto' }}>➕ Новое поручение</button>
-        )}
-      </div>
+    <>
+      <div className="card" style={{ display: 'flex', flexDirection: 'column' }}>
+        <h2>📋 Поручения</h2>
+        
+        <div style={{ 
+          display: 'flex', 
+          gap: '10px', 
+          borderBottom: '1px solid var(--border-light)', 
+          marginBottom: '16px',
+          flexShrink: 0
+        }}>
+          <button 
+            className={activeTab === 'received' ? 'primary' : 'secondary'} 
+            onClick={() => { setActiveTab('received'); setSelectedAssignment(null); }}
+          >
+            📥 Мне поручили
+          </button>
+          <button 
+            className={activeTab === 'given' ? 'primary' : 'secondary'} 
+            onClick={() => { setActiveTab('given'); setSelectedAssignment(null); }}
+          >
+            📤 Я поручил
+          </button>
+          {activeTab === 'given' && (
+            <button 
+              onClick={() => setShowCreateForm(!showCreateForm)} 
+              style={{ marginLeft: 'auto', flexShrink: 0 }}
+            >
+              ➕ Новое
+            </button>
+          )}
+        </div>
 
-      {activeTab === 'received' && (
-        <div>{received.length === 0 ? <p>Нет входящих поручений</p> : received.map(a => renderCard(a, 'received'))}</div>
-      )}
-
-      {activeTab === 'given' && (
-        <>
-          {showCreateForm && (
-            <form onSubmit={handleCreate} style={{ background: 'rgba(255,255,255,0.05)', padding: 15, borderRadius: 12, marginBottom: 20 }}>
-              <h3>Новое поручение</h3>
-              <select required value={newAssignment.toDepartmentId} onChange={e => setNewAssignment({...newAssignment, toDepartmentId: e.target.value, toUserId: ''})}>
+        {showCreateForm && activeTab === 'given' && (
+          <form onSubmit={handleCreate} style={{ 
+            background: 'rgba(255,255,255,0.05)', 
+            padding: '16px', 
+            borderRadius: '12px', 
+            marginBottom: '16px',
+            flexShrink: 0
+          }}>
+            <div style={{ marginBottom: '12px' }}>
+              <select 
+                required 
+                value={newAssignment.toDepartmentId} 
+                onChange={e => setNewAssignment({...newAssignment, toDepartmentId: e.target.value, toUserId: ''})}
+                style={{ width: '100%' }}
+              >
                 <option value="">Выберите отдел</option>
                 {departments.map(d => <option key={d.id} value={d.id}>{d.name}</option>)}
               </select>
-              
-              {newAssignment.toDepartmentId && (
-                <div style={{ marginTop: 10 }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-                    <input
-                      type="checkbox"
-                      checked={newAssignment.toSpecificUser}
-                      onChange={e => setNewAssignment({...newAssignment, toSpecificUser: e.target.checked, toUserId: ''})}
-                    />
-                    Конкретному сотруднику
-                  </label>
-                  {newAssignment.toSpecificUser && (
-                    <select 
-                      value={newAssignment.toUserId} 
-                      onChange={e => setNewAssignment({...newAssignment, toUserId: e.target.value})}
-                      style={{ marginTop: 8 }}
-                    >
-                      <option value="">Выберите сотрудника</option>
-                      {usersByDept.map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
-                    </select>
-                  )}
+            </div>
+            
+            {newAssignment.toDepartmentId && (
+              <div style={{ marginBottom: '12px' }}>
+                <label style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
+                  <input
+                    type="checkbox"
+                    checked={newAssignment.toSpecificUser}
+                    onChange={e => setNewAssignment({...newAssignment, toSpecificUser: e.target.checked, toUserId: ''})}
+                  />
+                  Конретному сотруднику
+                </label>
+                {newAssignment.toSpecificUser && (
+                  <select 
+                    value={newAssignment.toUserId} 
+                    onChange={e => setNewAssignment({...newAssignment, toUserId: e.target.value})}
+                    style={{ width: '100%' }}
+                  >
+                    <option value="">Выберите сотрудника</option>
+                    {usersByDept.map(u => <option key={u.id} value={u.id}>{u.fullName}</option>)}
+                  </select>
+                )}
+              </div>
+            )}
+            
+            <textarea 
+              placeholder="Текст поручения" 
+              required 
+              value={newAssignment.text} 
+              onChange={e => setNewAssignment({...newAssignment, text: e.target.value})} 
+              rows={3} 
+              style={{ width: '100%', marginBottom: '12px', resize: 'vertical' }}
+            />
+            <input 
+              type="date" 
+              placeholder="Срок (опционально)" 
+              value={newAssignment.deadline} 
+              onChange={e => setNewAssignment({...newAssignment, deadline: e.target.value})}
+              style={{ width: '100%', marginBottom: '12px' }}
+            />
+            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
+              <button className="primary" type="submit">Создать</button>
+              <button className="secondary" type="button" onClick={() => setShowCreateForm(false)}>Отмена</button>
+            </div>
+          </form>
+        )}
+
+        <div style={{ 
+          flex: '0 0 auto',
+          overflowY: 'auto',
+          overflowX: 'hidden',
+          paddingRight: '4px',
+          marginBottom: '8px',
+          minHeight: `${Math.min(ITEMS_PER_PAGE, currentList.length) * BUBBLE_HEIGHT}px`,
+          maxHeight: `${ITEMS_PER_PAGE * BUBBLE_HEIGHT}px`
+        }}>
+          {currentList.length === 0 ? (
+            <div style={{ 
+              textAlign: 'center', 
+              padding: '40px 20px', 
+              color: 'var(--text-secondary)' 
+            }}>
+              {activeTab === 'received' ? '📭 Нет входящих поручений' : '📤 Нет исходящих поручений'}
+            </div>
+          ) : (
+            currentList.map(a => renderChatBubble(a, activeTab))
+          )}
+        </div>
+      </div>
+
+      {selectedAssignment && (
+        <div 
+          className="modal-overlay"
+          onClick={() => setSelectedAssignment(null)}
+          style={{ 
+            position: 'fixed',
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+            background: 'rgba(0,0,0,0.5)',
+            display: 'flex',
+            justifyContent: 'center',
+            alignItems: 'center',
+            zIndex: 10000,
+            padding: '20px',
+            boxSizing: 'border-box'
+          }}
+        >
+          <div 
+            className="modal-content"
+            style={{ 
+              width: '95%',
+              maxWidth: '1200px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
+              background: 'var(--bg-card)',
+              backdropFilter: 'blur(8px)',
+              border: '1px solid var(--glass-border)',
+              borderRadius: 'var(--radius-md)',
+              padding: '20px',
+              color: 'var(--text-primary)',
+              position: 'relative'
+            }}
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              onClick={() => setSelectedAssignment(null)}
+              style={{
+                position: 'absolute',
+                top: '10px',
+                right: '10px',
+                background: 'transparent',
+                border: 'none',
+                fontSize: '24px',
+                cursor: 'pointer',
+                color: 'var(--text-primary)',
+                fontWeight: 'bold',
+                lineHeight: 1
+              }}
+            >
+              ×
+            </button>
+            
+            <h3 style={{ marginTop: 0, marginBottom: '20px' }}>
+              {selectedAssignment.type === 'received' ? '📥 Входящее поручение' : '📤 Исходящее поручение'}
+            </h3>
+            
+            <div>
+              <div style={{ marginBottom: '12px' }}>
+                <strong>{selectedAssignment.type === 'received' ? 'От кого:' : 'Кому:'}</strong>{' '}
+                {selectedAssignment.type === 'received'
+                  ? users.find(u => u.id === selectedAssignment.fromUserId)?.fullName || 'Неизвестный'
+                  : (users.find(u => u.id === selectedAssignment.toUserId)?.fullName ||
+                     departments.find(d => d.id === selectedAssignment.toDepartmentId)?.name ||
+                     'Неизвестный')
+                }
+              </div>
+              <div style={{ marginBottom: '12px' }}>
+                <strong>Текст:</strong> {selectedAssignment.text}
+              </div>
+              {selectedAssignment.deadline && (
+                <div style={{ marginBottom: '12px' }}>
+                  <strong>Срок:</strong> {formatDate(selectedAssignment.deadline)}
                 </div>
               )}
-              
-              <textarea placeholder="Текст поручения" required value={newAssignment.text} onChange={e => setNewAssignment({...newAssignment, text: e.target.value})} rows={2} style={{ width: '100%', marginTop: 10 }} />
-              <input type="date" placeholder="Срок" value={newAssignment.deadline} onChange={e => setNewAssignment({...newAssignment, deadline: e.target.value})} style={{ marginTop: 10 }} />
-              <div style={{ marginTop: 15, display: 'flex', justifyContent: 'flex-end', gap: 8 }}>
-                <button className="primary" type="submit">Создать</button>
-                <button className="secondary" type="button" onClick={() => setShowCreateForm(false)}>Отмена</button>
+              <div style={{ marginBottom: '12px' }}>
+                <strong>Статус:</strong>{' '}
+                {selectedAssignment.type === 'received' ? (
+                  <select 
+                    value={selectedAssignment.status} 
+                    onChange={(e) => {
+                      handleStatusChange(selectedAssignment.id, e.target.value);
+                      setSelectedAssignment({...selectedAssignment, status: e.target.value});
+                    }}
+                    style={{ marginLeft: '8px', padding: '4px 8px' }}
+                  >
+                    {Object.entries(statusLabels).map(([val, label]) => (
+                      <option key={val} value={val}>{label}</option>
+                    ))}
+                  </select>
+                ) : (
+                  <span style={{ color: statusColors[selectedAssignment.status] }}>
+                    {statusLabels[selectedAssignment.status]}
+                  </span>
+                )}
               </div>
-            </form>
-          )}
-          <div>{given.length === 0 ? <p>Нет исходящих поручений</p> : given.map(a => renderCard(a, 'given'))}</div>
-        </>
+              {selectedAssignment.comment && (
+                <div style={{ 
+                  padding: '12px', 
+                  background: 'rgba(0,0,0,0.05)', 
+                  borderRadius: '8px',
+                  marginBottom: '12px'
+                }}>
+                  <strong>Комментарий:</strong> {selectedAssignment.comment}
+                </div>
+              )}
+              {selectedAssignment.type === 'received' && (
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    placeholder="Ваш комментарий..."
+                    value={commentText[selectedAssignment.id] || ''}
+                    onChange={(e) => setCommentText({ ...commentText, [selectedAssignment.id]: e.target.value })}
+                    style={{ flex: 1, padding: '8px' }}
+                  />
+                  <button 
+                    className="secondary"
+                    onClick={() => {
+                      handleComment(selectedAssignment.id);
+                      setSelectedAssignment(prev => ({ ...prev, comment: commentText[selectedAssignment.id] || '' }));
+                    }}
+                  >
+                    Отправить
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
       )}
-    </div>
+    </>
   );
 }
