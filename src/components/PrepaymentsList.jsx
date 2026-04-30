@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAllPrepayments, updatePrepayment, getCustomers } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-import { formatDate } from '../utils/dateUtils';
 
 export default function PrepaymentsList({ userId }) {
   const [prepayments, setPrepayments] = useState([]);
@@ -31,13 +30,44 @@ export default function PrepaymentsList({ userId }) {
   }, [userId]);
 
   const handleStatusChange = async (id, newStatus) => {
-    await updatePrepayment(id, { status: newStatus });
-    loadData();
+    const prevStatus = prepayments.find(p => p.id === id)?.status;
+    
+    // Optimistic update
+    setPrepayments(prev => prev.map(p => 
+      p.id === id ? { ...p, status: newStatus } : p
+    ));
+
+    try {
+      await updatePrepayment(id, { status: newStatus });
+      // No full reload needed
+    } catch (err) {
+      // Revert on error
+      setPrepayments(prev => prev.map(p => 
+        p.id === id ? { ...p, status: prevStatus } : p
+      ));
+      console.error(err);
+    }
   };
 
   const handleAmountChange = async (id, newAmount) => {
-    await updatePrepayment(id, { amount: parseFloat(newAmount) || 0 });
-    loadData();
+    const prevAmount = prepayments.find(p => p.id === id)?.amount;
+    const amountValue = parseFloat(newAmount) || 0;
+    
+    // Optimistic update
+    setPrepayments(prev => prev.map(p => 
+      p.id === id ? { ...p, amount: amountValue } : p
+    ));
+
+    try {
+      await updatePrepayment(id, { amount: amountValue });
+      // No full reload needed
+    } catch (err) {
+      // Revert on error
+      setPrepayments(prev => prev.map(p => 
+        p.id === id ? { ...p, amount: prevAmount } : p
+      ));
+      console.error(err);
+    }
   };
 
   const filtered = prepayments.filter(p => {
@@ -95,7 +125,7 @@ export default function PrepaymentsList({ userId }) {
                   <option value="yes">Получена</option>
                 </select>
               </td>
-               <td style={{ border: '1px solid #ddd', padding: '8px' }}>{formatDate(new Date(p.createdAt?.toDate()))}</td>
+              <td style={{ border: '1px solid #ddd', padding: '8px' }}>{new Date(p.createdAt?.toDate()).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}</td>
               <td style={{ border: '1px solid #ddd', padding: '8px', textAlign: 'center' }}>
                 <button onClick={() => handleStatusChange(p.id, p.status === 'yes' ? 'no' : 'yes')}>🔄</button>
               </td>

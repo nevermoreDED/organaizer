@@ -1,8 +1,7 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import * as XLSX from 'xlsx';
-import { saveReport, getReports, getAllReports, addLog, getAllUsers, getUsersByDepartment } from '../services/dataService';
+import { saveReport, getReports, getAllReports, getUserById, addLog } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-import { formatDate } from '../utils/dateUtils';
 
 const departments = [
   { id: 'dept1', name: 'Логистика' },
@@ -31,12 +30,6 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
   const [usersCache, setUsersCache] = useState({});
   const [loadingMy, setLoadingMy] = useState(false);
   const [loadingAll, setLoadingAll] = useState(false);
-  const [saving, setSaving] = useState(false);
-
-  // Debounce timers refs
-  const loadMyTimerRef = useRef(null);
-  const loadAllTimerRef = useRef(null);
-  const [saving, setSaving] = useState(false);
 
   useEffect(() => {
     const loadUser = async () => {
@@ -68,15 +61,16 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
       } else {
         const all = await getAllReports(filterStart || null, filterEnd || null);
         const deptUsers = await getUsersByDepartment(currentUserDepartmentId);
-        const userIds = new Set(deptUsers.map(u => u.id));
-        reports = all.filter(r => userIds.has(r.userId));
+        const userIds = deptUsers.map(u => u.id);
+        reports = all.filter(r => userIds.includes(r.userId));
       }
-      // Optimize: fetch all users once instead of N separate calls
-      const allUsers = await getAllUsers();
-      const usersMap = allUsers.reduce((acc, user) => {
-        acc[user.id] = user.fullName || user.id;
-        return acc;
-      }, {});
+      const usersMap = {};
+      for (const report of reports) {
+        if (!usersMap[report.userId]) {
+          const user = await getUserById(report.userId);
+          usersMap[report.userId] = user?.fullName || report.userId;
+        }
+      }
       setUsersCache(usersMap);
       setAllReports(reports);
     } catch (err) {
@@ -91,26 +85,7 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
     if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it') {
       loadAllReports();
     }
-  }, []); // Only on mount
-
-  // Debounced filter changes
-  useEffect(() => {
-    if (loadMyTimerRef.current) clearTimeout(loadMyTimerRef.current);
-    loadMyTimerRef.current = setTimeout(() => {
-      loadMyReports();
-    }, 500);
-    return () => { if (loadMyTimerRef.current) clearTimeout(loadMyTimerRef.current); };
-  }, [filterStart, filterEnd, userId]);
-
-  useEffect(() => {
-    if (loadAllTimerRef.current) clearTimeout(loadAllTimerRef.current);
-    loadAllTimerRef.current = setTimeout(() => {
-      if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it') {
-        loadAllReports();
-      }
-    }, 500);
-    return () => { if (loadAllTimerRef.current) clearTimeout(loadAllTimerRef.current); };
-  }, [filterStart, filterEnd, currentUserRole, currentUserDepartmentId]);
+  }, [filterStart, filterEnd]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -118,12 +93,7 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
       alert('Заполните все обязательные поля');
       return;
     }
-    setSaving(true);
-    
-    // Optimistic: create temporary report object
-    const tempId = `temp_${Date.now()}`;
-    const newReport = {
-      id: tempId,
+    await saveReport(userId, {
       date,
       orders: parseInt(orders),
       requests: parseInt(requests),
@@ -134,14 +104,9 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
       foundDriver: foundDriver ? parseInt(foundDriver) : 0,
       notFoundDriver: notFoundDriver ? parseInt(notFoundDriver) : 0,
       comment,
-      departmentName: departments.find(d => d.id === currentUserObj?.departmentId)?.name || currentUserObj?.departmentId || '',
-      _optimistic: true
-    };
-    
-    // Add to UI immediately
-    setMyReports(prev => [newReport, ...prev]);
-    
-    // Clear form immediately
+      departmentName: departments.find(d => d.id === currentUserObj?.departmentId)?.name || currentUserObj?.departmentId || ''
+    });
+    await addLog(userId, currentUser.fullName, 'Добавление отчёта', `Дата: ${date}, заказы: ${orders}, запросы: ${requests}, ...`);
     setOrders('');
     setRequests('');
     setTransferred('');
@@ -153,41 +118,11 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
     setComment('');
     setAllowDateEdit(false);
     setDate(new Date().toISOString().split('T')[0]);
-    
-    try {
-      // Save to server
-      const result = await saveReport(userId, {
-        date: newReport.date,
-        orders: newReport.orders,
-        requests: newReport.requests,
-        transferred: newReport.transferred,
-        calls: newReport.calls,
-        incoming: newReport.incoming,
-        closed: newReport.closed,
-        foundDriver: newReport.foundDriver,
-        notFoundDriver: newReport.notFoundDriver,
-        comment: newReport.comment,
-        departmentName: newReport.departmentName
-      });
-      
-      // Replace temp with real ID
-      setMyReports(prev => prev.map(r => r.id === tempId ? { ...r, id: result.id, _optimistic: false } : r));
-      await addLog(userId, currentUser.fullName, 'Добавление отчёта', `Дата: ${date}, заказы: ${orders}, запросы: ${requests}, ...`);
-      
-      // Refresh all reports in background (don't await to avoid blocking)
-      Promise.all([
-        loadMyReports(),
-        ...(currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it' ? [loadAllReports()] : [])
-      ]).catch(err => console.error('Background refresh failed:', err));
-      
-      alert('Отчёт сохранён');
-    } catch (err) {
-      // Remove optimistic entry on error
-      setMyReports(prev => prev.filter(r => r.id !== tempId));
-      alert('Ошибка сохранения: ' + err.message);
-    } finally {
-      setSaving(false);
+    loadMyReports();
+    if (currentUserRole === 'admin' || currentUserRole === 'manager' || currentUserRole === 'it') {
+      loadAllReports();
     }
+    alert('Отчёт сохранён');
   };
 
   const exportToExcel = () => {
@@ -228,11 +163,11 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
             <input type="checkbox" checked={allowDateEdit} onChange={e => setAllowDateEdit(e.target.checked)} />
             Изменить дату
           </label>
-            {allowDateEdit ? (
-              <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
-            ) : (
-              <span>Дата отчёта: {formatDate(new Date())}</span>
-            )}
+          {allowDateEdit ? (
+            <input type="date" value={date} onChange={e => setDate(e.target.value)} required />
+          ) : (
+            <span>Дата отчёта: {new Date().toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}</span>
+          )}
         </div>
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: 10 }}>
           <input type="number" placeholder="Заказы (внесены в CRM)" value={orders} onChange={e => setOrders(e.target.value)} required />
@@ -245,9 +180,7 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
           <input type="number" placeholder="Не найден исполнитель (логистика)" value={notFoundDriver} onChange={e => setNotFoundDriver(e.target.value)} />
         </div>
         <textarea placeholder="Комментарии по смене" value={comment} onChange={e => setComment(e.target.value)} rows={3} style={{ marginTop: 10, width: '100%' }} />
-        <button className="primary" type="submit" disabled={saving} style={{ marginTop: 15 }}>
-          {saving ? 'Сохранение...' : 'Добавить отчёт'}
-        </button>
+        <button className="primary" type="submit" style={{ marginTop: 15 }}>Добавить отчёт</button>
       </form>
 
       <div style={{ marginBottom: 15, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -267,9 +200,9 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
             </tr>
           </thead>
           <tbody>
-             {myReports.map(r => (
-                <tr key={r.id}>
-                  <td>{formatDate(r.date)}</td>
+            {myReports.map(r => (
+              <tr key={r.id}>
+                <td>{r.date}</td>
                 <td>{r.orders}</td>
                 <td>{r.requests}</td>
                 <td>{r.transferred}</td>
@@ -296,11 +229,11 @@ export default function Reports({ userId, currentUserRole, currentUserDepartment
                 </tr>
               </thead>
               <tbody>
-                 {allReports.map(r => (
-                    <tr key={r.id}>
-                      <td>{usersCache[r.userId] || r.userId}</td>
-                      <td>{r.departmentName || ''}</td>
-                      <td>{formatDate(r.date)}</td>
+                {allReports.map(r => (
+                  <tr key={r.id}>
+                    <td>{usersCache[r.userId] || r.userId}</td>
+                    <td>{r.departmentName || ''}</td>
+                    <td>{r.date}</td>
                     <td>{r.orders}</td>
                     <td>{r.requests}</td>
                     <td>{r.transferred}</td>

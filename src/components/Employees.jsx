@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { getAllUsers, getUserById, addPointsToUser, addLog } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
@@ -17,6 +17,7 @@ export default function Employees({ currentUserId }) {
   const [selectedUserForPoints, setSelectedUserForPoints] = useState(null);
   const [pointsAmount, setPointsAmount] = useState('');
   const [pointsReason, setPointsReason] = useState('');
+  const reloadTimeout = useRef(null);
 
   const loadData = async () => {
     setLoading(true);
@@ -46,12 +47,42 @@ export default function Employees({ currentUserId }) {
       alert('Заполните количество и причину');
       return;
     }
-    await addPointsToUser(currentUser.id, selectedUserForPoints.id, parseInt(pointsAmount), pointsReason);
-    await addLog(currentUser.id, currentUser.fullName, 'Начисление баллов', `${selectedUserForPoints.fullName} +${pointsAmount} (${pointsReason})`);
+    
+    const amount = parseInt(pointsAmount);
+    const reason = pointsReason;
+    
+    // Optimistic update
+    setUsers(prev => prev.map(u => 
+      u.id === selectedUserForPoints.id 
+        ? { ...u, points: (u.points || 0) + amount }
+        : u
+    ));
+    
     setShowPointsModal(false);
     setPointsAmount('');
     setPointsReason('');
-    loadData();
+    
+    try {
+      await addPointsToUser(currentUser.id, selectedUserForPoints.id, amount, reason);
+      await addLog(currentUser.id, currentUser.fullName, 'Начисление баллов', `${selectedUserForPoints.fullName} +${amount} (${reason})`);
+      
+      // Debounced reload to sync with server, cancel previous pending reload
+      if (reloadTimeout.current) {
+        clearTimeout(reloadTimeout.current);
+      }
+      reloadTimeout.current = setTimeout(() => {
+        loadData();
+      }, 1000);
+    } catch (err) {
+      // Revert optimistic update on error
+      setUsers(prev => prev.map(u => 
+        u.id === selectedUserForPoints.id 
+          ? { ...u, points: Math.max(0, (u.points || 0) - amount) }
+          : u
+      ));
+      alert('Ошибка начисления баллов');
+      console.error(err);
+    }
   };
 
   if (loading) return <LoadingSpinner />;

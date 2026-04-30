@@ -1,7 +1,6 @@
 import { useState, useEffect, useRef } from 'react';
 import { getNotebook, addNote, deleteNote, updateNote } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-import { formatDate } from '../utils/dateUtils';
 
 function AutosizeTextarea({ value, onChange, placeholder }) {
   const textareaRef = useRef(null);
@@ -62,23 +61,83 @@ export default function NotesSidebar({ userId }) {
 
   const handleAddNote = async () => {
     if (!newNoteTitle.trim()) return;
-    await addNote(userId, { title: newNoteTitle.trim(), body: newNoteBody.trim() });
+    const tempId = `temp_${Date.now()}`;
+    const newNote = {
+      id: tempId,
+      title: newNoteTitle.trim(),
+      body: newNoteBody.trim(),
+      createdAt: new Date().toISOString()
+    };
+    
+    // Optimistic update
+    setNotebook(prev => ({
+      ...prev,
+      notes: [newNote, ...prev.notes]
+    }));
+    
     setNewNoteTitle('');
     setNewNoteBody('');
-    loadNotebook();
+    
+    try {
+      const created = await addNote(userId, { title: newNote.title, body: newNote.body });
+      // Replace temp with real note
+      setNotebook(prev => ({
+        ...prev,
+        notes: prev.notes.map(n => n.id === tempId ? { ...created, id: created.id } : n)
+      }));
+    } catch (err) {
+      // Revert on error
+      setNotebook(prev => ({
+        ...prev,
+        notes: prev.notes.filter(n => n.id !== tempId)
+      }));
+      console.error(err);
+    }
   };
 
   const handleDeleteNote = async (noteId) => {
-    if (window.confirm('Удалить заметку?')) {
+    if (!window.confirm('Удалить заметку?')) return;
+    
+    // Optimistic update
+    setNotebook(prev => ({
+      ...prev,
+      notes: prev.notes.filter(n => n.id !== noteId)
+    }));
+    
+    try {
       await deleteNote(userId, noteId);
+    } catch (err) {
+      // Reload to sync on error
       loadNotebook();
+      console.error(err);
     }
   };
 
   const handleUpdateNote = async (noteId, newTitle, newBody) => {
-    await updateNote(userId, noteId, newTitle, newBody);
+    const prevNote = notebook.notes.find(n => n.id === noteId);
+    
+    // Optimistic update
+    setNotebook(prev => ({
+      ...prev,
+      notes: prev.notes.map(n => 
+        n.id === noteId ? { ...n, title: newTitle, body: newBody } : n
+      )
+    }));
+    
     setViewingNote(null);
-    loadNotebook();
+    
+    try {
+      await updateNote(userId, noteId, newTitle, newBody);
+    } catch (err) {
+      // Revert on error
+      setNotebook(prev => ({
+        ...prev,
+        notes: prev.notes.map(n => 
+          n.id === noteId ? prevNote : n
+        )
+      }));
+      console.error(err);
+    }
   };
 
   if (loading) return <LoadingSpinner />;
@@ -120,9 +179,9 @@ export default function NotesSidebar({ userId }) {
             >
               <div style={{ flex: 1, overflow: 'hidden' }}>
                 <strong>{note.title}</strong>
-                 <small style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
-                   {formatDate(new Date(note.createdAt))}
-                 </small>
+                <small style={{ display: 'block', fontSize: '0.7rem', color: 'var(--text-muted)' }}>
+                  {new Date(note.createdAt).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' })}
+                </small>
               </div>
               <button
                 className="danger"

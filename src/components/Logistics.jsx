@@ -12,7 +12,6 @@ import LoadingSpinner from './LoadingSpinner';
 import FinanceStats from './FinanceStats';
 import PrepaymentsList from './PrepaymentsList';
 import ImportModal from './ImportModal';
-import { formatDate } from '../utils/dateUtils';
 
 export default function Logistics({ userId, currentUser }) {
   const [activeTab, setActiveTab] = useState('finance');
@@ -378,10 +377,10 @@ export default function Logistics({ userId, currentUser }) {
             </thead>
             <tbody>
               {payments.map(p => (
-                 <tr key={p.id}>
-                   <td>{p.driverName}</td>
-                   <td>{p.amount}</td>
-                   <td>{formatDate(p.date)}</td>
+                <tr key={p.id}>
+                  <td>{p.driverName}</td>
+                  <td>{p.amount}</td>
+                  <td>{p.date}</td>
                   <td><select value={p.status} onChange={e => updatePaymentStatus(p.id, e.target.value)}>
                     <option value="waiting">Ждём предоплату</option>
                     <option value="partial">Частично оплачено</option>
@@ -397,10 +396,10 @@ export default function Logistics({ userId, currentUser }) {
             <thead><tr><th>Описание</th><th>Сумма</th><th>Дата</th><th>Статус</th><th>Действия</th></tr></thead>
             <tbody>
               {plan.map(p => (
-                 <tr key={p.id}>
-                   <td>{p.description}</td>
-                   <td>{p.amount}</td>
-                   <td>{formatDate(p.dueDate)}</td>
+                <tr key={p.id}>
+                  <td>{p.description}</td>
+                  <td>{p.amount}</td>
+                  <td>{p.dueDate}</td>
                   <td><select value={p.status} onChange={e => updatePlanStatus(p.id, e.target.value)}>
                     <option value="planned">Запланировано</option>
                     <option value="paid">Оплачено</option>

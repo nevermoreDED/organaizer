@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getTasks, addTask, updateTask, deleteTask } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-import { formatDate } from '../utils/dateUtils';
 
 export default function TaskList({ userId, filter }) {
   const [tasks, setTasks] = useState([]);
@@ -148,7 +147,7 @@ export default function TaskList({ userId, filter }) {
               }}
               onClick={() => toggleDone(task)}
             >
-               {task.title} {task.dueDate && <small>(до {formatDate(task.dueDate)})</small>}
+              {task.title} {task.dueDate && <small>(до {task.dueDate})</small>}
             </span>
             <button className="secondary" onClick={() => toggleDone(task)}>✅</button>
             <button className="secondary" onClick={() => handleDelete(task.id)}>🗑️</button>

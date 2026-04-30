@@ -37,28 +37,35 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
     }
   }));
 
-  const loadAllEvents = async () => {
-    setLoading(true);
-    try {
-      const [calendarEvents, taskEvents] = await Promise.all([
-        getEvents(userId),
-        getTasksAsEvents(userId)
-      ]);
-      const formattedEvents = calendarEvents.map(ev => ({
-        id: ev.id,
-        title: ev.title,
-        start: ev.datetime,
-        end: ev.endDatetime || undefined,
-        extendedProps: { type: 'event', originalId: ev.id, comment: ev.comment || '' }
-      }));
-      setEvents([...formattedEvents, ...taskEvents]);
-      if (calendarRef.current) calendarRef.current.getApi().refetchEvents();
-    } catch (err) {
-      console.error('Ошибка загрузки:', err);
-    } finally {
-      setLoading(false);
-    }
-  };
+   const loadAllEvents = async () => {
+     setLoading(true);
+     try {
+       const [calendarEvents, taskEvents] = await Promise.all([
+         getEvents(userId),
+         getTasksAsEvents(userId)
+       ]);
+       const formattedEvents = calendarEvents.map(ev => ({
+         id: ev.id,
+         title: ev.title,
+         start: ev.datetime,
+         end: ev.endDatetime,
+         comment: ev.comment,
+         type: 'event'
+       }));
+       const formattedTasks = taskEvents.map(ev => ({
+         id: ev.id,
+         title: ev.title,
+         start: ev.dueDate,
+         comment: ev.comment,
+         status: ev.status,
+         type: 'task'
+       }));
+       setEvents([...formattedEvents, ...formattedTasks]);
+     } catch (err) {
+       console.error('Ошибка загрузки событий:', err);
+     }
+     setLoading(false);
+   };
 
   useEffect(() => {
     if (userId) {
@@ -152,11 +159,7 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
           datetime: currentItem.start,
           comment: currentItem.comment
         };
-         if (hasEndDate && currentItem.end) {
-           eventData.endDatetime = currentItem.end;
-         } else {
-           eventData.endDatetime = null;
-         }
+        if (hasEndDate && currentItem.end) eventData.endDatetime = currentItem.end;
         if (currentItem.id) {
           await updateEvent(currentItem.id, eventData);
         } else {
@@ -184,50 +187,57 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
     }
   };
 
-  const toggleTaskStatus = async () => {
-    if (itemType !== 'task' || !currentItem.id) return;
-    const newStatus = currentItem.status === 'done' ? 'active' : 'done';
-    try {
-      await updateTask(currentItem.id, { status: newStatus });
-      setCurrentItem({ ...currentItem, status: newStatus });
-      window.dispatchEvent(new Event('tasks-updated'));
-      await loadAllEvents();
-    } catch (err) {
-      console.error('Ошибка изменения статуса:', err);
-    }
-  };
+   const toggleTaskStatus = async () => {
+     if (itemType !== 'task' || !currentItem.id) return;
+     const newStatus = currentItem.status === 'done' ? 'active' : 'done';
+     try {
+       await updateTask(currentItem.id, { status: newStatus });
+       setCurrentItem({ ...currentItem, status: newStatus });
+       window.dispatchEvent(new Event('tasks-updated'));
+       await loadAllEvents();
+     } catch (err) {
+       console.error('Ошибка изменения статуса:', err);
+     }
+   };
 
-  if (loading) return <LoadingSpinner />;
+   const eventContent = (arg) => {
+     const { event } = arg;
+     const timeStr = event.start.getHours().toString().padStart(2, '0') + ':' + 
+                     event.start.getMinutes().toString().padStart(2, '0');
+     const title = event.title;
+     return (
+       <div className="fc-content" style={{ display: 'flex', alignItems: 'center' }}>
+         <span style={{ fontWeight: 'bold', marginRight: 8 }}>{timeStr}</span>
+         <span>{title}</span>
+       </div>
+     );
+   };
+
+   if (loading) return <LoadingSpinner />;
 
   return (
     <div className="card" style={{ marginBottom: 30 }}>
       <h2>📅 Календарь</h2>
-      <FullCalendar
-        ref={calendarRef}
-        plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
-        headerToolbar={{
-          left: 'prev,next today',
-          center: 'title',
-          right: 'dayGridMonth,timeGridWeek,timeGridDay'
-        }}
-        initialView="dayGridMonth"
-        selectable={true}
-        select={handleDateSelect}
-        eventClick={handleEventClick}
-        events={events}
-        height="auto"
-        locale="ru"
-        firstDay={1}
-        timeZone={timezone}
-        buttonText={{ today: 'Сегодня', month: 'Месяц', week: 'Неделя', day: 'День' }}
-        displayEventTime={true}
-        displayEventEnd={true}
-        eventTimeFormat={{
-          hour: '2-digit',
-          minute: '2-digit',
-          hour12: false
-        }}
-      />
+       <FullCalendar
+         ref={calendarRef}
+         plugins={[dayGridPlugin, timeGridPlugin, interactionPlugin]}
+         headerToolbar={{
+           left: 'prev,next today',
+           center: 'title',
+           right: 'dayGridMonth,timeGridWeek,timeGridDay'
+         }}
+         initialView="dayGridMonth"
+         selectable={true}
+         select={handleDateSelect}
+         eventClick={handleEventClick}
+         events={events}
+         eventTimeFormat={{ hour: '2-digit', minute: '2-digit', meridiem: false }}
+         height="auto"
+         locale="ru"
+         firstDay={1}
+         timeZone={timezone}
+         buttonText={{ today: 'Сегодня', month: 'Месяц', week: 'Неделя', day: 'День' }}
+       />
 
       {showModal && (
         <div style={modalOverlayStyle}>
@@ -260,10 +270,10 @@ const Calendar = forwardRef(({ userId, timezone }, ref) => {
                   <label>Дата и время начала:</label>
                   <input type="datetime-local" value={formatDateTimeLocal(currentItem.start)} onChange={e => setCurrentItem({...currentItem, start: e.target.value})} style={{ width: '100%' }} />
                 </div>
-                 <div>
-                   <label><input type="checkbox" checked={hasEndDate} onChange={e => { setHasEndDate(e.target.checked); if (!e.target.checked) setCurrentItem({...currentItem, end: ''}); }} /> Указать дату окончания</label>
-                   {hasEndDate && <input type="datetime-local" value={formatDateTimeLocal(currentItem.end)} onChange={e => setCurrentItem({...currentItem, end: e.target.value})} style={{ width: '100%', marginTop: 8 }} />}
-                 </div>
+                <div>
+                  <label><input type="checkbox" checked={hasEndDate} onChange={e => setHasEndDate(e.target.checked)} /> Указать дату окончания</label>
+                  {hasEndDate && <input type="datetime-local" value={formatDateTimeLocal(currentItem.end)} onChange={e => setCurrentItem({...currentItem, end: e.target.value})} style={{ width: '100%', marginTop: 8 }} />}
+                </div>
               </>
             )}
             

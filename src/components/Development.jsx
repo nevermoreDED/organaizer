@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getContracts, addContract, updateContract, deleteContract, getExpiringContracts, addLog } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-import { formatDate } from '../utils/dateUtils';
 
 const statuses = [
   { value: 'draft', label: 'Черновик', color: '#6c757d' },
@@ -121,9 +120,9 @@ export default function Development({ userId, departmentId, currentUser }) {
       {expiring.length > 0 && (
         <div style={{ background: 'rgba(255,193,7,0.2)', borderLeft: '4px solid #ffc107', padding: 12, marginBottom: 20, borderRadius: 8 }}>
           <strong>⚠️ Внимание!</strong> У следующих договоров истекает срок в ближайшие 30 дней:
-           <ul>
-             {expiring.map(c => <li key={c.id}>{c.title} – {c.counterparty} (до {formatDate(c.endDate)})</li>)}
-           </ul>
+          <ul>
+            {expiring.map(c => <li key={c.id}>{c.title} – {c.counterparty} (до {c.endDate})</li>)}
+          </ul>
         </div>
       )}
       <div style={{ marginBottom: 15, display: 'flex', gap: 10, flexWrap: 'wrap', alignItems: 'center' }}>
@@ -143,11 +142,11 @@ export default function Development({ userId, departmentId, currentUser }) {
           </thead>
           <tbody>
             {filteredContracts.map(c => (
-               <tr key={c.id}>
-                 <td>{c.title}</td>
-                 <td>{c.counterparty}</td>
-                 <td>{c.startDate ? formatDate(c.startDate) : ''}</td>
-                 <td>{c.endDate ? formatDate(c.endDate) : ''}</td>
+              <tr key={c.id}>
+                <td>{c.title}</td>
+                <td>{c.counterparty}</td>
+                <td>{c.startDate || ''}</td>
+                <td>{c.endDate || ''}</td>
                 <td style={{ color: statuses.find(s => s.value === c.status)?.color }}>
                   {statuses.find(s => s.value === c.status)?.label}
                 </td>

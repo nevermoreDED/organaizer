@@ -8,7 +8,6 @@ import {
 } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 import ImportModal from './ImportModal';
-import { formatDate } from '../utils/dateUtils';
 
 const departments = [
   { id: 'dept1', name: 'Логистика' },
@@ -505,10 +504,10 @@ export default function ShiftSchedule({ currentUser }) {
               <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
                 <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
                 <ul>
-                   {req.proposedShifts.map((shift, idx) => {
-                     const user = users.find(u => u.id === shift.userId);
-                     return <li key={`${req.id}_${idx}`}>{user?.fullName} – {formatDate(shift.date)}: {shift.oldValue} → {shift.newValue}</li>;
-                   })}
+                  {req.proposedShifts.map((shift, idx) => {
+                    const user = users.find(u => u.id === shift.userId);
+                    return <li key={`${req.id}_${idx}`}>{user?.fullName} – {shift.date}: {shift.oldValue} → {shift.newValue}</li>;
+                  })}
                 </ul>
                 <button className="success" onClick={() => handleApproveRequest(req)}>✅ Одобрить</button>
                 <button className="danger" onClick={() => handleRejectRequest(req)}>❌ Отклонить</button>
@@ -525,7 +524,7 @@ export default function ShiftSchedule({ currentUser }) {
             overtimeRequests.map(req => (
               <div key={req.id} style={{ borderBottom: `1px solid ${borderColor}`, marginBottom: 8, padding: 8 }}>
                 <p><strong>Сотрудник:</strong> {users.find(u => u.id === req.fromUserId)?.fullName}</p>
-                 <p><strong>Дата:</strong> {formatDate(req.shiftDate)}</p>
+                <p><strong>Дата:</strong> {req.shiftDate}</p>
                 <p><strong>Текущее значение:</strong> {req.originalValue}</p>
                 <p><strong>Переработка:</strong> +{req.overtimeHours} ч.</p>
                 <p><strong>Новое значение:</strong> {req.originalValue}+{req.overtimeHours}</p>

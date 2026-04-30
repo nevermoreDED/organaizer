@@ -1,7 +1,6 @@
 import { useState, useEffect } from 'react';
 import { getAllLogs } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
-import { formatDateTime } from '../utils/dateUtils';
 
 export default function LogsViewer() {
   const [logs, setLogs] = useState([]);
@@ -54,7 +53,7 @@ export default function LogsViewer() {
           <tbody>
             {filteredLogs.map(log => (
               <tr key={log.id}>
-                <td style={{ whiteSpace: 'nowrap' }}>{formatDateTime(new Date(log.timestamp?.toDate()))}</td>
+                <td style={{ whiteSpace: 'nowrap' }}>{new Date(log.timestamp?.toDate()).toLocaleString()}</td>
                 <td>{log.userName}</td>
                 <td>{log.action}</td>
                 <td>{log.details}</td>

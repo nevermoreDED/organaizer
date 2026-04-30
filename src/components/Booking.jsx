@@ -1,54 +1,20 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import {
   getChecklists, addChecklist, updateChecklist, deleteChecklist, addLog
 } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
-function AutosizeTextarea({ value, onChange, placeholder }) {
-  const textareaRef = useRef(null);
-
-  const adjustHeight = () => {
-    const textarea = textareaRef.current;
-    if (textarea) {
-      textarea.style.height = 'auto';
-      textarea.style.height = `${textarea.scrollHeight}px`;
-    }
-  };
-
-  useEffect(() => {
-    adjustHeight();
-  }, [value]);
-
-  return (
-    <textarea
-      ref={textareaRef}
-      value={value}
-      onChange={onChange}
-      placeholder={placeholder}
-      rows={1}
-      style={{
-        width: '100%',
-        marginBottom: '8px',
-        overflow: 'hidden',
-        resize: 'vertical',
-        minHeight: '40px'
-      }}
-      onInput={adjustHeight}
-    />
-  );
-}
-
 export default function Booking({ userId, currentUser }) {
   const [activeTab, setActiveTab] = useState('checklists');
+  const [loading, setLoading] = useState(false);
   const [checklists, setChecklists] = useState([]);
   const [newChecklistTitle, setNewChecklistTitle] = useState('');
-  const [loading, setLoading] = useState(false);
 
   const loadChecklists = async () => {
     setLoading(true);
     try {
-      const data = await getChecklists(userId);
-      setChecklists(data);
+      const lists = await getChecklists(userId);
+      setChecklists(lists);
     } catch (err) {
       console.error(err);
     } finally {
@@ -96,7 +62,7 @@ export default function Booking({ userId, currentUser }) {
     await addLog(currentUser.id, currentUser.fullName, 'Добавление пункта чек-листа', `${checklist.title}: ${text}`);
   };
 
-  const handleDeleteChecklist = async (id) => {
+  const deleteChecklist = async (id) => {
     if (window.confirm('Удалить чек-лист?')) {
       const checklist = checklists.find(c => c.id === id);
       await deleteChecklist(id);
@@ -127,7 +93,7 @@ export default function Booking({ userId, currentUser }) {
             <div key={cl.id} style={{ border: '1px solid var(--border-light)', padding: 10, marginBottom: 10, borderRadius: 8 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between' }}>
                 <strong>{cl.title}</strong>
-                <button className="danger" onClick={() => handleDeleteChecklist(cl.id)}>🗑️</button>
+                <button className="danger" onClick={() => deleteChecklist(cl.id)}>🗑️</button>
               </div>
               <ul>
                 {(cl.items || []).map((item, idx) => (
@@ -168,47 +134,6 @@ function Calculator() {
   const [prevValue, setPrevValue] = useState(null);
   const [operator, setOperator] = useState(null);
   const [waitingForOperand, setWaitingForOperand] = useState(false);
-  const displayRef = useRef(null);
-
-  useEffect(() => {
-    const handleKeyDown = (e) => {
-      if (e.key >= '0' && e.key <= '9' || e.key === '.' || e.key === '+' || e.key === '-' || e.key === '*' || e.key === '/' || e.key === 'Enter' || e.key === 'Escape' || e.key === 'Backspace') {
-        e.preventDefault();
-      }
-
-      if (e.key >= '0' && e.key <= '9') {
-        inputDigit(parseInt(e.key, 10));
-      } else if (e.key === '.') {
-        inputDecimal();
-      } else if (e.key === '+') {
-        performOperation('+');
-      } else if (e.key === '-') {
-        performOperation('-');
-      } else if (e.key === '*') {
-        performOperation('*');
-      } else if (e.key === '/') {
-        performOperation('/');
-      } else if (e.key === 'Enter' || e.key === '=') {
-        equals();
-      } else if (e.key === 'Escape') {
-        clear();
-      } else if (e.key === 'Backspace') {
-        setDisplay(prev => {
-          if (prev.length === 1 || (prev.length === 2 && prev.startsWith('-'))) {
-            return '0';
-          }
-          return prev.slice(0, -1);
-        });
-      }
-    };
-
-    if (displayRef.current) {
-      displayRef.current.focus();
-    }
-
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [display, prevValue, operator, waitingForOperand]);
 
   const inputDigit = (digit) => {
     if (waitingForOperand) {
@@ -266,23 +191,81 @@ function Calculator() {
     setWaitingForOperand(true);
   };
 
+  const handleBackspace = () => {
+    if (waitingForOperand) {
+      return;
+    }
+    if (display.length === 1) {
+      setDisplay('0');
+    } else {
+      setDisplay(display.slice(0, -1));
+    }
+  };
+
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      // Prevent default for keys that might cause scrolling or form submission
+      if (
+        ['Enter', '=', 'Escape', 'Backspace', '.', '+', '-', '*', '/', '0', '1', '2', '3', '4', '5', '6', '7', '8', '9', 'c', 'C']
+        .includes(e.key)
+      ) {
+        e.preventDefault();
+      }
+
+      switch (e.key) {
+        case '0':
+        case '1':
+        case '2':
+        case '3':
+        case '4':
+        case '5':
+        case '6':
+        case '7':
+        case '8':
+        case '9':
+          inputDigit(Number(e.key));
+          break;
+        case '.':
+          inputDecimal();
+          break;
+        case '+':
+          performOperation('+');
+          break;
+        case '-':
+          performOperation('-');
+          break;
+        case '*':
+          performOperation('*');
+          break;
+        case '/':
+          performOperation('/');
+          break;
+        case 'Enter':
+        case '=':
+          equals();
+          break;
+        case 'Escape':
+        case 'c':
+        case 'C':
+          clear();
+          break;
+        case 'Backspace':
+          handleBackspace();
+          break;
+        default:
+          break;
+      }
+    };
+
+    document.addEventListener('keydown', handleKeyDown);
+    return () => {
+      document.removeEventListener('keydown', handleKeyDown);
+    };
+  }, []); // Empty deps because we only want to add once when the component mounts
+
   return (
     <div style={{ maxWidth: 300, margin: '0 auto' }}>
-      <div 
-        ref={displayRef}
-        tabIndex={0}
-        style={{ 
-          background: 'rgba(255,255,255,0.1)', 
-          padding: 15, 
-          fontSize: 24, 
-          textAlign: 'right', 
-          marginBottom: 10, 
-          borderRadius: 8,
-          outline: 'none'
-        }}
-      >
-        {display}
-      </div>
+      <div style={{ background: 'rgba(255,255,255,0.1)', padding: 15, fontSize: 24, textAlign: 'right', marginBottom: 10, borderRadius: 8 }}>{display}</div>
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: 5 }}>
         <button className="secondary" onClick={clear}>C</button>
         <button className="secondary" onClick={() => performOperation('/')}>/</button>

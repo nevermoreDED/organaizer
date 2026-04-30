@@ -15,6 +15,7 @@ import NotesSidebar from './components/NotesSidebar';
 import TodayItemsSidebar from './components/TodayItemsSidebar';
 import LogsViewer from './components/LogsViewer';
 import AdminPanel from './components/AdminPanel';
+import { updateAssignment } from './services/dataService';
 import './index.css';
 
 function App() {
@@ -24,6 +25,13 @@ function App() {
   const [mainTab, setMainTab] = useState('organizer');
   const [theme, setTheme] = useState(localStorage.getItem('theme') || 'dark');
   const calendarRef = useRef();
+  const [editingAssignment, setEditingAssignment] = useState(null);
+  const [assignmentEditForm, setAssignmentEditForm] = useState({
+    text: '',
+    deadline: '',
+    status: 'new',
+    comment: ''
+  });
 
   useEffect(() => {
     localStorage.setItem('timezone', timezone);
@@ -51,6 +59,27 @@ function App() {
   const handleAddToday = () => {
     if (calendarRef.current) {
       calendarRef.current.openCreateModal();
+    }
+  };
+
+  const handleOpenAssignmentEdit = (assignment) => {
+    setAssignmentEditForm({
+      text: assignment.text,
+      deadline: assignment.deadline || '',
+      status: assignment.status,
+      comment: assignment.comment || ''
+    });
+    setEditingAssignment(assignment);
+  };
+
+  const handleSaveAssignmentEdit = async () => {
+    if (!editingAssignment) return;
+    try {
+      await updateAssignment(editingAssignment.id, assignmentEditForm);
+      setEditingAssignment(null);
+      window.dispatchEvent(new Event('assignments-updated'));
+    } catch (err) {
+      console.error('Ошибка сохранения поручения:', err);
     }
   };
 
@@ -130,7 +159,7 @@ function App() {
                 <AttentionBlock userId={currentUser.id} departmentId={currentUser.departmentId} />
                 <Calendar ref={calendarRef} userId={currentUser.id} timezone={timezone} />
                 <UpcomingView userId={currentUser.id} />
-                <Assignments currentUser={currentUser} />
+                <Assignments currentUser={currentUser} onEdit={handleOpenAssignmentEdit} />
                 <ResourcesPanel />
               </div>
               <div style={{ justifySelf: 'start' }}>
@@ -153,6 +182,169 @@ function App() {
         {mainTab === 'logs' && isAdmin && <LogsViewer />}
         {showAdmin && <AdminPanel currentUser={currentUser} onClose={() => setShowAdmin(false)} />}
       </div>
+
+      {/* Assignment Edit Modal - Global Overlay */}
+      {editingAssignment && (
+        <div style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          right: 0,
+          bottom: 0,
+          background: 'rgba(0,0,0,0.5)',
+          display: 'flex',
+          justifyContent: 'center',
+          alignItems: 'center',
+          zIndex: 10000,
+          backdropFilter: 'blur(4px)'
+        }}>
+          <div style={{
+            background: 'var(--bg-card)',
+            backdropFilter: 'blur(12px)',
+            border: '1px solid var(--glass-border)',
+            borderRadius: 'var(--radius-md)',
+            padding: '24px',
+            width: '520px',
+            maxWidth: '95vw',
+            color: 'var(--text-primary)',
+            maxHeight: '90vh',
+            overflowY: 'auto',
+            boxShadow: '0 8px 32px rgba(0,0,0,0.3)'
+          }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 20 }}>
+              <h3 style={{ margin: 0, fontSize: '1.2rem' }}>
+                Редактирование поручения
+              </h3>
+              <button
+                onClick={() => setEditingAssignment(null)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  fontSize: '1.8rem',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                  lineHeight: 1,
+                  padding: 0,
+                  width: 32,
+                  height: 32,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center'
+                }}
+              >
+                ×
+              </button>
+            </div>
+
+            <div style={{ marginBottom: 16 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 500, fontSize: '0.9rem' }}>
+                Текст поручения:
+              </label>
+              <textarea
+                value={assignmentEditForm.text}
+                onChange={(e) => setAssignmentEditForm({ ...assignmentEditForm, text: e.target.value })}
+                rows={3}
+                style={{
+                  width: '100%',
+                  padding: 12,
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  resize: 'vertical',
+                  fontSize: '0.95rem',
+                  lineHeight: 1.5
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 16, marginBottom: 16 }}>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, fontWeight: 500, fontSize: '0.9rem' }}>
+                  Срок выполнения:
+                </label>
+                <input
+                  type="date"
+                  value={assignmentEditForm.deadline}
+                  onChange={(e) => setAssignmentEditForm({ ...assignmentEditForm, deadline: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: 10,
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid var(--border-light)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)',
+                    fontSize: '0.95rem'
+                  }}
+                />
+              </div>
+              <div>
+                <label style={{ display: 'block', marginBottom: 6, fontWeight: 500, fontSize: '0.9rem' }}>
+                  Статус:
+                </label>
+                <select
+                  value={assignmentEditForm.status}
+                  onChange={(e) => setAssignmentEditForm({ ...assignmentEditForm, status: e.target.value })}
+                  style={{
+                    width: '100%',
+                    padding: 10,
+                    background: 'rgba(255,255,255,0.08)',
+                    border: '1px solid var(--border-light)',
+                    borderRadius: 8,
+                    color: 'var(--text-primary)',
+                    fontSize: '0.95rem'
+                  }}
+                >
+                  <option value="new">🟡 Поставлено</option>
+                  <option value="in_progress">🔵 В работе</option>
+                  <option value="done">🟢 Выполнено</option>
+                  <option value="no_response">🔴 Нет ответа</option>
+                </select>
+              </div>
+            </div>
+
+            <div style={{ marginBottom: 20 }}>
+              <label style={{ display: 'block', marginBottom: 6, fontWeight: 500, fontSize: '0.9rem' }}>
+                Комментарий:
+              </label>
+              <textarea
+                value={assignmentEditForm.comment}
+                onChange={(e) => setAssignmentEditForm({ ...assignmentEditForm, comment: e.target.value })}
+                rows={3}
+                placeholder="Добавьте комментарий..."
+                style={{
+                  width: '100%',
+                  padding: 12,
+                  background: 'rgba(255,255,255,0.08)',
+                  border: '1px solid var(--border-light)',
+                  borderRadius: 8,
+                  color: 'var(--text-primary)',
+                  resize: 'vertical',
+                  fontSize: '0.95rem',
+                  lineHeight: 1.5
+                }}
+              />
+            </div>
+
+            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: 10, paddingTop: 16, borderTop: '1px solid var(--border-light)' }}>
+              <button
+                className="secondary"
+                onClick={() => setEditingAssignment(null)}
+                style={{ padding: '10px 20px', fontSize: '0.9rem' }}
+              >
+                Отмена
+              </button>
+              <button
+                className="primary"
+                onClick={handleSaveAssignmentEdit}
+                style={{ padding: '10px 20px', fontSize: '0.9rem' }}
+              >
+                Сохранить изменения
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

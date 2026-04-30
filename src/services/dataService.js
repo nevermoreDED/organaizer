@@ -4,69 +4,6 @@ import {
   getDocs, query, where, orderBy, Timestamp, writeBatch 
 } from 'firebase/firestore';
 
-// ========== OPTIMIZATION: Request deduplication & batching ==========
-// Cache for promises to avoid duplicate simultaneous requests
-  const pendingRequests = new Map();
-  
-  // Get cache key from arguments
-  const getCacheKey = (fnName, args) => {
-    return `${fnName}_${JSON.stringify(args)}`;
-  };
-  
-  // Wrapper to deduplicate identical simultaneous requests
-  const dedupedRequest = async (fnName, fn, args) => {
-    const cacheKey = getCacheKey(fnName, args);
-    
-    if (pendingRequests.has(cacheKey)) {
-      console.log(`[DEDUP] Returning cached promise for ${fnName}`);
-      return pendingRequests.get(cacheKey);
-    }
-    
-    const promise = (async () => {
-      await waitForSlot();
-      try {
-        const result = await fn(...args);
-        return result;
-      } finally {
-        releaseSlot();
-        pendingRequests.delete(cacheKey);
-      }
-    })();
-    
-    pendingRequests.set(cacheKey, promise);
-    return promise;
-  };
-
-// Batch multiple writes into a single Firestore transaction
-export const batchWrite = async (operations) => {
-  const batch = writeBatch(db);
-  operations.forEach(op => {
-    const { type, path, data } = op;
-    const ref = doc(db, ...path.split('/'));
-    if (type === 'set') {
-      batch.set(ref, data, { merge: true });
-    } else if (type === 'update') {
-      batch.update(ref, data);
-    } else if (type === 'delete') {
-      batch.delete(ref);
-    }
-  });
-  await batch.commit();
-};
-
-// Debounce helper for rapid successive calls
-export const debounce = (func, wait) => {
-  let timeout;
-  return function executedFunction(...args) {
-    const later = () => {
-      clearTimeout(timeout);
-      func(...args);
-    };
-    clearTimeout(timeout);
-    timeout = setTimeout(later, wait);
-  };
-};
-
 // ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
 const todayStr = () => {
   const d = new Date();
@@ -102,7 +39,7 @@ export const addLog = async (userId, userName, action, details = '') => {
 };
 
 // ===================== ЗАДАЧИ =====================
-export const getTasks = withRateLimit(async (userId, filter = 'all') => {
+export const getTasks = async (userId, filter = 'all') => {
   let q = query(collection(db, 'tasks'), where('userId', '==', userId));
   const today = todayStr();
   if (filter === 'today') {
@@ -112,33 +49,7 @@ export const getTasks = withRateLimit(async (userId, filter = 'all') => {
   }
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
-
-export const getTasksAsEvents = withRateLimit(async (userId) => {
-  const q = query(collection(db, 'tasks'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => {
-    const data = doc.data();
-    return {
-      id: doc.id,
-      title: data.title,
-      start: data.dueDate,
-      end: null,
-      extendedProps: { type: 'task', originalId: doc.id, comment: data.comment || '', status: data.status || 'active' }
-    };
-  });
-});
-
-export const getTasksByDateRange = withRateLimit(async (userId, start, end) => {
-  const q = query(
-    collection(db, 'tasks'),
-    where('userId', '==', userId),
-    where('dueDate', '>=', start),
-    where('dueDate', '<=', end)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
+};
 
 export const addTask = async (task) => {
   const docRef = await addDoc(collection(db, 'tasks'), {
@@ -184,30 +95,13 @@ export const getTasksByDateRange = async (userId, startDate, endDate) => {
 };
 
 // ===================== СОБЫТИЯ =====================
-export const getEvents = withRateLimit(async (userId, startDate = null, endDate = null) => {
+export const getEvents = async (userId, startDate, endDate) => {
   let q = query(collection(db, 'events'), where('userId', '==', userId));
-  if (startDate) {
-    q = query(q, where('datetime', '>=', startDate));
-  }
-  if (endDate) {
-    q = query(q, where('datetime', '<=', endDate));
-  }
+  if (startDate) q = query(q, where('datetime', '>=', startDate));
+  if (endDate) q = query(q, where('datetime', '<=', endDate));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
-
-export const getEventsByDate = withRateLimit(async (userId, date) => {
-  const start = date;
-  const end = date + 'T23:59:59';
-  const q = query(
-    collection(db, 'events'),
-    where('userId', '==', userId),
-    where('datetime', '>=', start),
-    where('datetime', '<=', end)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
+};
 
 export const addEvent = async (event) => {
   const docRef = await addDoc(collection(db, 'events'), {
@@ -241,7 +135,7 @@ export const getEventsByDate = async (userId, date) => {
 };
 
 // ===================== ПОРУЧЕНИЯ =====================
-export const getAssignmentsReceived = withRateLimit(async (userId, departmentId) => {
+export const getAssignmentsReceived = async (userId, departmentId) => {
   const q1 = query(collection(db, 'assignments'), where('toUserId', '==', userId));
   const q2 = query(collection(db, 'assignments'), where('toDepartmentId', '==', departmentId), where('toUserId', '==', null));
   const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
@@ -254,13 +148,13 @@ export const getAssignmentsReceived = withRateLimit(async (userId, departmentId)
     return a;
   });
   return assignments;
-});
+};
 
-export const getAssignmentsGiven = withRateLimit(async (userId) => {
+export const getAssignmentsGiven = async (userId) => {
   const q = query(collection(db, 'assignments'), where('fromUserId', '==', userId));
   const snapshot = await getDocs(q);
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
+};
 
 export const createAssignment = async (assignment) => {
   const docRef = await addDoc(collection(db, 'assignments'), {
@@ -609,37 +503,18 @@ export const updateOvertimeRequest = async (requestId, status) => {
   await updateDoc(doc(db, 'overtime_requests', requestId), { status, processedAt: Timestamp.now() });
 };
 
-// Wrap Firestore calls with deduplication and rate limiting
-const withRateLimit = (fn) => async (...args) => {
-  const fnName = fn.name || 'anonymous';
-  return dedupedRequest(fnName, fn, args);
-};
-
 // ===================== ПОЛЬЗОВАТЕЛИ =====================
-export const getAllUsers = withRateLimit(async () => {
+export const getAllUsers = async () => {
   const snapshot = await getDocs(collection(db, 'users'));
   return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
+};
 
-export const getUserById = withRateLimit(async (userId) => {
-  const docRef = doc(db, 'users', userId);
-  const docSnap = await getDoc(docRef);
-  return docSnap.exists() ? { id: docSnap.id, ...docSnap.data() } : null;
-});
-
-export const getUsersByDepartment = withRateLimit(async (departmentId) => {
-  const q = query(collection(db, 'users'), where('departmentId', '==', departmentId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-});
-
-export const getUserByLogin = withRateLimit(async (login) => {
-  const q = query(collection(db, 'users'), where('login', '==', login));
+export const getUserByLogin = async (login, password) => {
+  const q = query(collection(db, 'users'), where('login', '==', login), where('password', '==', password));
   const snapshot = await getDocs(q);
   if (snapshot.empty) return null;
-  const doc = snapshot.docs[0];
-  return { id: doc.id, ...doc.data() };
-});
+  return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+};
 
 export const getUserById = async (userId) => {
   const docRef = doc(db, 'users', userId);
