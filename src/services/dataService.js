@@ -1,76 +1,97 @@
-import { db } from '../firebase';
-import { 
-  collection, addDoc, updateDoc, deleteDoc, doc, getDoc,
-  getDocs, query, where, orderBy, Timestamp, writeBatch 
-} from 'firebase/firestore';
+// CRM API сервис - все функции работают через API /api/v1/organizer/
+const API_BASE = '/api/v1/organizer';
 
-// ========== ВСПОМОГАТЕЛЬНЫЕ ФУНКЦИИ ==========
-const todayStr = () => new Date().toISOString().split('T')[0];
-
-// ===================== ЛОГИ =====================
-// Получить все логи (только для админов)
-export const getAllLogs = async () => {
-  const q = query(collection(db, 'admin_logs'), orderBy('timestamp', 'desc'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+const handleResponse = async (response) => {
+  if (!response.ok) {
+    const errorData = await response.json();
+    throw new Error(errorData.message || `API Error: ${response.status}`);
+  }
+  const data = await response.json();
+  return data.result || data;
 };
 
-// Добавить запись в лог
+// ========== АВТОРИЗАЦИЯ ==========
+export const getUserByLogin = async (login, password) => {
+  if (login && password) {
+    // Для CRM используем Bitrix авторизацию, эта функция не используется
+    // но оставлена для совместимости
+    return null;
+  }
+  
+  // Получаем данные из window.BITRIX_USER
+  if (typeof window !== 'undefined' && window.BITRIX_USER) {
+    return {
+      id: window.BITRIX_USER.ID,
+      fullName: window.BITRIX_USER.NAME,
+      email: window.BITRIX_USER.EMAIL,
+      login: window.BITRIX_USER.LOGIN,
+      isAdmin: window.BITRIX_USER.IS_ADMIN,
+      departmentId: window.BITRIX_USER.DEPARTMENT_ID,
+      role: window.BITRIX_USER.role
+    };
+  }
+  return null;
+};
+
+// ========== ЛОГИ ==========
+export const getAllLogs = async () => {
+  const response = await fetch(`${API_BASE}/logs`);
+  return handleResponse(response);
+};
+
 export const addLog = async (userId, userName, action, details = '') => {
-  let ip = 'неизвестно';
+  let ip = 'Unknown';
   try {
     const res = await fetch('https://api.ipify.org?format=json');
     const data = await res.json();
     ip = data.ip;
   } catch (e) {
-    console.error('Не удалось определить IP', e);
+    console.error('Failed to get IP', e);
   }
-  await addDoc(collection(db, 'admin_logs'), {
-    userId,
-    userName,
-    action,
-    details,
-    ip,
-    timestamp: Timestamp.now()
+  
+  const response = await fetch(`${API_BASE}/logs`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, userName, action, details, ip })
   });
+  return handleResponse(response);
 };
 
-// ===================== ЗАДАЧИ =====================
+// ========== ЗАДАЧИ ==========
 export const getTasks = async (userId, filter = 'all') => {
-  let q = query(collection(db, 'tasks'), where('userId', '==', userId));
-  const today = todayStr();
-  if (filter === 'today') {
-    q = query(q, where('dueDate', '==', today));
-  } else if (filter === 'upcoming') {
-    q = query(q, where('dueDate', '>', today));
-  }
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams({ userId, filter });
+  const response = await fetch(`${API_BASE}/tasks?${params}`);
+  return handleResponse(response);
 };
 
 export const addTask = async (task) => {
-  const docRef = await addDoc(collection(db, 'tasks'), {
-    ...task,
-    dueDate: task.dueDate || null,
-    status: task.status || 'active',
-    comment: task.comment || '',
-    createdAt: Timestamp.now()
+  const response = await fetch(`${API_BASE}/tasks`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(task)
   });
-  return { id: docRef.id, ...task };
+  return handleResponse(response);
 };
 
 export const updateTask = async (id, changes) => {
-  const taskRef = doc(db, 'tasks', id);
-  await updateDoc(taskRef, changes);
+  const response = await fetch(`${API_BASE}/tasks/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes)
+  });
+  return handleResponse(response);
 };
 
 export const deleteTask = async (id) => {
-  await deleteDoc(doc(db, 'tasks', id));
+  const response = await fetch(`${API_BASE}/tasks/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
 };
 
 export const getTasksAsEvents = async (userId) => {
-  const tasks = await getTasks(userId, 'all');
-  return tasks.filter(t => t.dueDate).map(t => ({
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/tasks/events?${params}`);
+  const tasks = await handleResponse(response);
+  return (tasks || []).filter(t => t.dueDate).map(t => ({
     id: `task_${t.id}`,
     title: t.title,
     start: t.dueDate,
@@ -81,695 +102,117 @@ export const getTasksAsEvents = async (userId) => {
 };
 
 export const getTasksByDateRange = async (userId, startDate, endDate) => {
-  const q = query(
-    collection(db, 'tasks'),
-    where('userId', '==', userId),
-    where('dueDate', '>=', startDate),
-    where('dueDate', '<=', endDate)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams({ userId, startDate, endDate });
+  const response = await fetch(`${API_BASE}/tasks/range?${params}`);
+  return handleResponse(response);
 };
 
-// ===================== СОБЫТИЯ =====================
+// ========== СОБЫТИЯ ==========
 export const getEvents = async (userId, startDate, endDate) => {
-  let q = query(collection(db, 'events'), where('userId', '==', userId));
-  if (startDate) q = query(q, where('datetime', '>=', startDate));
-  if (endDate) q = query(q, where('datetime', '<=', endDate));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams({ userId, startDate, endDate });
+  const response = await fetch(`${API_BASE}/events?${params}`);
+  return handleResponse(response);
 };
 
 export const addEvent = async (event) => {
-  const docRef = await addDoc(collection(db, 'events'), {
-    ...event,
-    datetime: event.datetime,
-    endDatetime: event.endDatetime || null,
-    createdAt: Timestamp.now()
+  const response = await fetch(`${API_BASE}/events`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(event)
   });
-  return { id: docRef.id, ...event };
+  return handleResponse(response);
 };
 
 export const updateEvent = async (id, changes) => {
-  await updateDoc(doc(db, 'events', id), changes);
+  const response = await fetch(`${API_BASE}/events/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes)
+  });
+  return handleResponse(response);
 };
 
 export const deleteEvent = async (id) => {
-  await deleteDoc(doc(db, 'events', id));
+  const response = await fetch(`${API_BASE}/events/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
 };
 
 export const getEventsByDate = async (userId, date) => {
-  const start = date;
-  const end = date + 'T23:59:59';
-  const q = query(
-    collection(db, 'events'),
-    where('userId', '==', userId),
-    where('datetime', '>=', start),
-    where('datetime', '<=', end)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams({ userId, date });
+  const response = await fetch(`${API_BASE}/events/date?${params}`);
+  return handleResponse(response);
 };
 
-// ===================== ПОРУЧЕНИЯ =====================
+// ========== ПОРУЧЕНИЯ ==========
 export const getAssignmentsReceived = async (userId, departmentId) => {
-  const q1 = query(collection(db, 'assignments'), where('toUserId', '==', userId));
-  const q2 = query(collection(db, 'assignments'), where('toDepartmentId', '==', departmentId), where('toUserId', '==', null));
-  const [snap1, snap2] = await Promise.all([getDocs(q1), getDocs(q2)]);
-  let assignments = [...snap1.docs, ...snap2.docs].map(doc => ({ id: doc.id, ...doc.data() }));
-  const today = todayStr();
-  assignments = assignments.map(a => {
-    if (a.deadline && a.deadline < today && a.status !== 'done') {
-      return { ...a, status: 'no_response' };
-    }
-    return a;
-  });
-  return assignments;
+  const params = new URLSearchParams({ userId, departmentId });
+  const response = await fetch(`${API_BASE}/assignments/received?${params}`);
+  return handleResponse(response);
 };
 
 export const getAssignmentsGiven = async (userId) => {
-  const q = query(collection(db, 'assignments'), where('fromUserId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/assignments/given?${params}`);
+  return handleResponse(response);
 };
 
 export const createAssignment = async (assignment) => {
-  const docRef = await addDoc(collection(db, 'assignments'), {
-    ...assignment,
-    status: assignment.status || 'new',
-    createdAt: Timestamp.now()
+  const response = await fetch(`${API_BASE}/assignments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(assignment)
   });
-  return { id: docRef.id, ...assignment };
+  return handleResponse(response);
 };
 
 export const updateAssignment = async (id, changes) => {
-  await updateDoc(doc(db, 'assignments', id), changes);
-};
-
-// ===================== МАТЕРИАЛЫ =====================
-export const getResourceSections = async () => {
-  const snapshot = await getDocs(collection(db, 'resourceSections'));
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addResourceSection = async (title) => {
-  const docRef = await addDoc(collection(db, 'resourceSections'), { title, sortOrder: Date.now() });
-  return { id: docRef.id, title };
-};
-
-export const getResourceLinks = async (sectionId) => {
-  const q = query(collection(db, 'resourceLinks'), where('sectionId', '==', sectionId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addResourceLink = async (link) => {
-  const docRef = await addDoc(collection(db, 'resourceLinks'), link);
-  return { id: docRef.id, ...link };
-};
-
-// ===================== БЛОК ВНИМАНИЯ =====================
-export const getAttentionBlock = async (userId, departmentId) => {
-  const today = todayStr();
-  const allTasksQuery = query(collection(db, 'tasks'), where('userId', '==', userId));
-  const allTasksSnap = await getDocs(allTasksQuery);
-  const allTasks = allTasksSnap.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  
-  const overdueTasks = allTasks.filter(t => 
-    t.dueDate && t.dueDate < today && t.status !== 'done'
-  );
-  const todayTasks = allTasks.filter(t => 
-    t.dueDate === today && t.status !== 'done'
-  );
-  
-  const received = await getAssignmentsReceived(userId, departmentId);
-  const overdueAssignments = received.filter(a => 
-    a.deadline && a.deadline < today && a.status !== 'done'
-  );
-  const todayAssignments = received.filter(a => 
-    a.deadline === today && a.status !== 'done'
-  );
-  
-  return { overdueTasks, todayTasks, overdueAssignments, todayAssignments };
-};
-
-// ===================== ЛОГИСТИКА: ИСПОЛНИТЕЛИ =====================
-export const getAllDrivers = async () => {
-  const q = query(collection(db, 'logistics_drivers'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const getDrivers = async (userId) => {
-  const q = query(collection(db, 'logistics_drivers'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addDriver = async (userId, driverData) => {
-  const docRef = await addDoc(collection(db, 'logistics_drivers'), {
-    userId,
-    name: driverData.name,
-    contact: driverData.contact || '',
-    email: driverData.email || '',
-    city: driverData.city || '',
-    category: driverData.category || '',
-    active: driverData.active !== undefined ? driverData.active : true,
-    createdAt: Timestamp.now()
+  const response = await fetch(`${API_BASE}/assignments/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(changes)
   });
-  return { id: docRef.id, ...driverData };
+  return handleResponse(response);
 };
 
-export const updateDriver = async (id, changes) => {
-  await updateDoc(doc(db, 'logistics_drivers', id), changes);
-};
-
-export const deleteDriver = async (id) => {
-  await deleteDoc(doc(db, 'logistics_drivers', id));
-};
-
-export const getCustomers = async (userId) => {
-  const q = query(collection(db, 'logistics_customers'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addCustomer = async (userId, customerData) => {
-  const docRef = await addDoc(collection(db, 'logistics_customers'), {
-    userId,
-    name: customerData.name,
-    contact: customerData.contact || '',
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...customerData };
-};
-
-export const deleteCustomer = async (id) => {
-  await deleteDoc(doc(db, 'logistics_customers', id));
-};
-
-// ===================== ЛОГИСТИКА: ФИНАНСЫ =====================
-export const getPaymentsToDrivers = async (userId) => {
-  const q = query(collection(db, 'finance_payments'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addPaymentToDriver = async (payment) => {
-  const docRef = await addDoc(collection(db, 'finance_payments'), {
-    ...payment,
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...payment };
-};
-
-export const updatePaymentToDriver = async (id, changes) => {
-  await updateDoc(doc(db, 'finance_payments', id), changes);
-};
-
-export const deletePaymentToDriver = async (id) => {
-  await deleteDoc(doc(db, 'finance_payments', id));
-};
-
-export const getPaymentPlan = async (userId, weekStart) => {
-  const q = query(
-    collection(db, 'finance_plan'),
-    where('userId', '==', userId),
-    where('weekStart', '==', weekStart)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addPaymentPlanItem = async (item) => {
-  const docRef = await addDoc(collection(db, 'finance_plan'), {
-    ...item,
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...item };
-};
-
-export const updatePaymentPlanItem = async (id, changes) => {
-  await updateDoc(doc(db, 'finance_plan', id), changes);
-};
-
-export const deletePaymentPlanItem = async (id) => {
-  await deleteDoc(doc(db, 'finance_plan', id));
-};
-
-export const getAllPrepayments = async (userId) => {
-  const q = query(collection(db, 'finance_prepayments'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const setPrepayment = async (userId, orderId, status, amount) => {
-  const existing = await (async () => {
-    const q = query(collection(db, 'finance_prepayments'), where('userId', '==', userId), where('orderId', '==', orderId));
-    const snap = await getDocs(q);
-    return snap.empty ? null : { id: snap.docs[0].id, ...snap.docs[0].data() };
-  })();
-  if (existing) {
-    await updateDoc(doc(db, 'finance_prepayments', existing.id), { status, amount });
-  } else {
-    await addDoc(collection(db, 'finance_prepayments'), {
-      userId,
-      orderId,
-      status,
-      amount,
-      createdAt: Timestamp.now()
-    });
-  }
-};
-
-export const updatePrepayment = async (id, changes) => {
-  await updateDoc(doc(db, 'finance_prepayments', id), changes);
-};
-
-export const getPhotosByDriver = async (userId, driverId) => {
-  const q = query(
-    collection(db, 'photo_control'),
-    where('userId', '==', userId),
-    where('driverId', '==', driverId)
-  );
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addPhoto = async (photo) => {
-  const docRef = await addDoc(collection(db, 'photo_control'), {
-    ...photo,
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...photo };
-};
-
-export const deletePhoto = async (id) => {
-  await deleteDoc(doc(db, 'photo_control', id));
-};
-
-// ===================== ЛОГИСТИКА: СТАТИСТИКА =====================
-export const getTotalPayments = async (userId, driverId = null, dateFrom = null, dateTo = null) => {
-  let q = query(collection(db, 'finance_payments'), where('userId', '==', userId));
-  if (driverId) q = query(q, where('driverId', '==', driverId));
-  const snapshot = await getDocs(q);
-  let payments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  if (dateFrom) payments = payments.filter(p => p.date >= dateFrom);
-  if (dateTo) payments = payments.filter(p => p.date <= dateTo);
-  const total = payments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  return { total, count: payments.length };
-};
-
-export const getTotalPlan = async (userId, weekStart = null, status = null) => {
-  let q = query(collection(db, 'finance_plan'), where('userId', '==', userId));
-  if (weekStart) q = query(q, where('weekStart', '==', weekStart));
-  const snapshot = await getDocs(q);
-  let plan = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  if (status) plan = plan.filter(p => p.status === status);
-  const total = plan.reduce((sum, p) => sum + (p.amount || 0), 0);
-  return { total, count: plan.length };
-};
-
-export const getTotalPrepaymentsAmount = async (userId, customerId = null, status = null) => {
-  let q = query(collection(db, 'finance_prepayments'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  let prepayments = snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-  if (customerId) prepayments = prepayments.filter(p => p.orderId?.includes(customerId));
-  if (status) prepayments = prepayments.filter(p => p.status === status);
-  const total = prepayments.reduce((sum, p) => sum + (p.amount || 0), 0);
-  return { total, count: prepayments.length };
-};
-
-// ===================== ГРАФИК СМЕН =====================
-export const getShiftsByMonth = async (yearMonth) => {
-  const q = query(collection(db, 'shifts'), where('yearMonth', '==', yearMonth));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const setShiftForDate = async (userId, date, value) => {
-  const yearMonth = date.slice(0, 7);
-  const q = query(collection(db, 'shifts'), where('userId', '==', userId), where('date', '==', date));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) {
-    await addDoc(collection(db, 'shifts'), { userId, date, yearMonth, value });
-  } else {
-    await updateDoc(doc(db, 'shifts', snapshot.docs[0].id), { value });
-  }
-};
-
-export const deleteShiftByDate = async (userId, date) => {
-  const q = query(collection(db, 'shifts'), where('userId', '==', userId), where('date', '==', date));
-  const snapshot = await getDocs(q);
-  snapshot.forEach(async (docSnap) => {
-    await deleteDoc(doc(db, 'shifts', docSnap.id));
-  });
-};
-
-export const saveShiftsBatch = async (userId, updates) => {
-  const batch = writeBatch(db);
-  for (const { userId: uId, date, value } of updates) {
-    const q = query(collection(db, 'shifts'), where('userId', '==', uId), where('date', '==', date));
-    const snapshot = await getDocs(q);
-    if (snapshot.empty) {
-      const docRef = doc(collection(db, 'shifts'));
-      batch.set(docRef, { userId: uId, date, yearMonth: date.slice(0, 7), value });
-    } else {
-      const docRef = doc(db, 'shifts', snapshot.docs[0].id);
-      batch.update(docRef, { value });
-    }
-  }
-  await batch.commit();
-};
-
-export const getTodayShifts = async () => {
-  const today = new Date().toISOString().split('T')[0];
-  const q = query(collection(db, 'shifts'), where('date', '==', today));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-// ===================== ЗАПРОСЫ НА ИЗМЕНЕНИЕ ГРАФИКА =====================
-export const createShiftRequest = async (fromUserId, proposedShifts, targetMonth) => {
-  const docRef = await addDoc(collection(db, 'shift_requests'), {
-    fromUserId,
-    proposedShifts,
-    targetMonth,
-    status: 'pending',
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id };
-};
-
-export const getShiftRequestsForManager = async (departmentId) => {
-  const usersSnap = await getDocs(query(collection(db, 'users'), where('departmentId', '==', departmentId)));
-  const userIds = usersSnap.docs.map(doc => doc.id);
-  if (userIds.length === 0) return [];
-  const q = query(collection(db, 'shift_requests'), where('fromUserId', 'in', userIds), where('status', '==', 'pending'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const updateShiftRequest = async (requestId, status, appliedShifts = null) => {
-  if (status === 'approved' && appliedShifts) {
-    for (const shift of appliedShifts) {
-      await setShiftForDate(shift.userId, shift.date, shift.newValue);
-    }
-  }
-  await updateDoc(doc(db, 'shift_requests', requestId), { status, processedAt: Timestamp.now() });
-};
-
-// ===================== ПЕРЕРАБОТКИ =====================
-export const createOvertimeRequest = async (fromUserId, shiftDate, originalValue, overtimeHours, targetMonth) => {
-  const docRef = await addDoc(collection(db, 'overtime_requests'), {
-    fromUserId,
-    shiftDate,
-    originalValue,
-    overtimeHours,
-    targetMonth,
-    status: 'pending',
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id };
-};
-
-export const getOvertimeRequestsForManager = async (departmentId) => {
-  const usersSnap = await getDocs(query(collection(db, 'users'), where('departmentId', '==', departmentId)));
-  const userIds = usersSnap.docs.map(doc => doc.id);
-  if (userIds.length === 0) return [];
-  const q = query(collection(db, 'overtime_requests'), where('fromUserId', 'in', userIds), where('status', '==', 'pending'));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const updateOvertimeRequest = async (requestId, status) => {
-  await updateDoc(doc(db, 'overtime_requests', requestId), { status, processedAt: Timestamp.now() });
-};
-
-// ===================== ПОЛЬЗОВАТЕЛИ =====================
+// ========== ПОЛЬЗОВАТЕЛИ ==========
 export const getAllUsers = async () => {
-  const snapshot = await getDocs(collection(db, 'users'));
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const getUserByLogin = async (login, password) => {
-  const q = query(collection(db, 'users'), where('login', '==', login), where('password', '==', password));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return null;
-  return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
+  const response = await fetch(`${API_BASE}/users/all`);
+  return handleResponse(response);
 };
 
 export const getUserById = async (userId) => {
-  const docRef = doc(db, 'users', userId);
-  const snap = await getDoc(docRef);
-  if (!snap.exists()) return null;
-  return { id: snap.id, ...snap.data() };
+  const response = await fetch(`${API_BASE}/users/${userId}`);
+  return handleResponse(response);
 };
 
 export const getUsersByDepartment = async (departmentId) => {
-  const q = query(collection(db, 'users'), where('departmentId', '==', departmentId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams({ departmentId });
+  const response = await fetch(`${API_BASE}/users/department?${params}`);
+  return handleResponse(response);
 };
 
-export const createUser = async (userData) => {
-  const docRef = await addDoc(collection(db, 'users'), {
-    ...userData,
-    isIT: userData.isIT || false,
-    points: userData.points || 0,
-    pointsHistory: userData.pointsHistory || [],
-    kpi: userData.kpi || { day: { calls: 0, sales: 0, rating: 0 }, week: { calls: 0, sales: 0, rating: 0 }, month: { calls: 0, sales: 0, rating: 0 } },
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...userData };
-};
-
-export const updateUser = async (userId, changes) => {
-  await updateDoc(doc(db, 'users', userId), changes);
-};
-
-export const deleteUser = async (userId) => {
-  await deleteDoc(doc(db, 'users', userId));
-};
-
-export const changePassword = async (userId, oldPassword, newPassword, isAdmin = false) => {
-  const user = await getUserById(userId);
-  if (!user) throw new Error('Пользователь не найден');
-  if (!isAdmin && user.password !== oldPassword) throw new Error('Неверный старый пароль');
-  await updateUser(userId, { password: newPassword });
-};
-
-// ===================== ПРОГРЕССИКИ (НАЧИСЛЕНИЕ БАЛЛОВ) =====================
-export const addPointsToUser = async (fromUserId, toUserId, amount, reason) => {
-  const user = await getUserById(toUserId);
-  const newPoints = (user.points || 0) + amount;
-  const historyItem = { amount, reason, date: new Date().toISOString(), fromUserId };
-  const newHistory = [...(user.pointsHistory || []), historyItem];
-  await updateUser(toUserId, { points: newPoints, pointsHistory: newHistory });
-};
-
-// ===================== ОТЧЁТЫ (KPI) =====================
-export const getReports = async (userId, startDate, endDate) => {
-  let q = query(collection(db, 'reports'), where('userId', '==', userId));
-  if (startDate) q = query(q, where('date', '>=', startDate));
-  if (endDate) q = query(q, where('date', '<=', endDate));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
+// ========== ОТЧЁТЫ ==========
 export const getAllReports = async (startDate, endDate) => {
-  let q = collection(db, 'reports');
-  if (startDate) q = query(q, where('date', '>=', startDate));
-  if (endDate) q = query(q, where('date', '<=', endDate));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
+  const params = new URLSearchParams();
+  if (startDate) params.append('startDate', startDate);
+  if (endDate) params.append('endDate', endDate);
+  const response = await fetch(`${API_BASE}/reports/all?${params}`);
+  return handleResponse(response);
 };
 
-export const saveReport = async (userId, report) => {
-  const docRef = await addDoc(collection(db, 'reports'), {
-    userId,
-    date: report.date,
-    orders: report.orders || 0,
-    requests: report.requests || 0,
-    transferred: report.transferred || 0,
-    calls: report.calls || 0,
-    incoming: report.incoming || 0,
-    closed: report.closed || 0,
-    foundDriver: report.foundDriver || 0,
-    notFoundDriver: report.notFoundDriver || 0,
-    comment: report.comment || '',
-    departmentName: report.departmentName || '',
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...report };
-};
-
-// ===================== БРОНИРОВАНИЕ: ЧЕК-ЛИСТЫ =====================
-export const getChecklists = async (userId) => {
-  const q = query(collection(db, 'booking_checklists'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addChecklist = async (userId, title) => {
-  const docRef = await addDoc(collection(db, 'booking_checklists'), {
-    userId,
-    title,
-    items: [],
-    createdAt: Timestamp.now()
-  });
-  return { id: docRef.id, title, items: [] };
-};
-
-export const updateChecklist = async (id, items) => {
-  await updateDoc(doc(db, 'booking_checklists', id), { items });
-};
-
-export const deleteChecklist = async (id) => {
-  await deleteDoc(doc(db, 'booking_checklists', id));
-};
-
-// ===================== БРОНИРОВАНИЕ: ЗАПИСНАЯ КНИЖКА =====================
-export const getNotebook = async (userId) => {
-  const q = query(collection(db, 'booking_notebook'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return { notes: [] };
-  return { id: snapshot.docs[0].id, notes: snapshot.docs[0].data().notes || [] };
-};
-
-export const addNote = async (userId, note) => {
-  const notebook = await getNotebook(userId);
-  const newNotes = [...(notebook.notes || []), { 
-    id: Date.now().toString(), 
-    title: note.title, 
-    body: note.body || '',
-    createdAt: new Date().toISOString() 
-  }];
-  if (notebook.id) {
-    await updateDoc(doc(db, 'booking_notebook', notebook.id), { notes: newNotes });
-  } else {
-    await addDoc(collection(db, 'booking_notebook'), { userId, notes: newNotes });
-  }
-};
-
-export const deleteNote = async (userId, noteId) => {
-  const notebook = await getNotebook(userId);
-  const newNotes = (notebook.notes || []).filter(n => n.id !== noteId);
-  await updateDoc(doc(db, 'booking_notebook', notebook.id), { notes: newNotes });
-};
-
-export const updateNote = async (userId, noteId, newTitle, newBody) => {
-  const notebook = await getNotebook(userId);
-  const updatedNotes = (notebook.notes || []).map(note =>
-    note.id === noteId ? { ...note, title: newTitle, body: newBody } : note
-  );
-  await updateDoc(doc(db, 'booking_notebook', notebook.id), { notes: updatedNotes });
-};
-
-// ===================== БРОНИРОВАНИЕ: ВЫСЛУГА ЛЕТ =====================
-export const getSeniority = async (userId) => {
-  const q = query(collection(db, 'booking_seniority'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  if (snapshot.empty) return { startDate: null, bonus: 0 };
-  return { id: snapshot.docs[0].id, ...snapshot.docs[0].data() };
-};
-
-export const setStartDate = async (userId, startDate) => {
-  const existing = await getSeniority(userId);
-  const start = startDate || new Date().toISOString().split('T')[0];
-  if (existing.id) {
-    await updateDoc(doc(db, 'booking_seniority', existing.id), { startDate: start });
-  } else {
-    await addDoc(collection(db, 'booking_seniority'), { userId, startDate: start });
-  }
-};
-
-export const calculateBonus = (years) => {
-  if (years < 1) return 0;
-  if (years < 2) return 3000;
-  if (years < 3) return 5000;
-  return 8000;
-};
-
-// ===================== БРОНИРОВАНИЕ: KPI (ЗАГЛУШКА) =====================
+// ========== БРОНИРОВАНИЕ: KPI ==========
 export const getKPI = async (userId) => {
-  return {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/booking/kpi?${params}`);
+  const result = await handleResponse(response);
+  return result || {
     day: { calls: 12, sales: 3, rating: 4.5 },
     week: { calls: 87, sales: 21, rating: 4.7 },
     month: { calls: 340, sales: 89, rating: 4.6 }
   };
 };
 
-// ===================== РАЗВИТИЕ: ДОГОВОРЫ =====================
-export const getContracts = async (userId, departmentId) => {
-  const q = query(collection(db, 'contracts'), where('userId', '==', userId));
-  const snapshot = await getDocs(q);
-  return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
-};
-
-export const addContract = async (contract) => {
-  const docRef = await addDoc(collection(db, 'contracts'), {
-    ...contract,
-    createdAt: Timestamp.now(),
-    updatedAt: Timestamp.now()
-  });
-  return { id: docRef.id, ...contract };
-};
-
-export const updateContract = async (id, changes) => {
-  await updateDoc(doc(db, 'contracts', id), { ...changes, updatedAt: Timestamp.now() });
-};
-
-export const deleteContract = async (id) => {
-  await deleteDoc(doc(db, 'contracts', id));
-};
-
-export const getExpiringContracts = async (userId, daysThreshold = 30) => {
-  const contracts = await getContracts(userId, null);
-  const today = new Date();
-  const future = new Date();
-  future.setDate(today.getDate() + daysThreshold);
-  return contracts.filter(c => {
-    if (!c.endDate) return false;
-    const end = new Date(c.endDate);
-    return end >= today && end <= future;
-  });
-};
-// ===================== ОБНОВЛЕНИЕ ПОРЯДКА СОТРУДНИКОВ =====================
-export const updateUsersOrder = async (orderedUsers) => {
-  const batch = writeBatch(db);
-  orderedUsers.forEach((user, index) => {
-    const userRef = doc(db, 'users', user.id);
-    batch.update(userRef, { order: index });
-  });
-  await batch.commit();
-};
-// ===================== УВЕДОМЛЕНИЯ =====================
-// Запросить разрешение на уведомления
-export const requestNotificationPermission = async () => {
-  if (!('Notification' in window)) {
-    console.log('Браузер не поддерживает уведомления');
-    return false;
-  }
-  if (Notification.permission === 'granted') {
-    return true;
-  }
-  if (Notification.permission !== 'denied') {
-    const permission = await Notification.requestPermission();
-    return permission === 'granted';
-  }
-  return false;
-};
-
-// Отправить браузерное уведомление
-export const sendBrowserNotification = (title, body, icon = '/logo.png') => {
-  if (!('Notification' in window)) return;
-  if (Notification.permission === 'granted') {
-    new Notification(title, { body, icon });
-  }
-};
-
-// Сохранить уведомление в localStorage для внутреннего интерфейса
+// ========== УВЕДОМЛЕНИЯ (localStorage) ==========
 export const addNotification = (title, message, type = 'info') => {
   const notifications = JSON.parse(localStorage.getItem('app_notifications') || '[]');
   notifications.unshift({
@@ -780,19 +223,15 @@ export const addNotification = (title, message, type = 'info') => {
     timestamp: new Date().toISOString(),
     read: false
   });
-  // Оставляем только последние 50 уведомлений
   if (notifications.length > 50) notifications.pop();
   localStorage.setItem('app_notifications', JSON.stringify(notifications));
-  // Диспатчим событие для обновления счётчика
   window.dispatchEvent(new Event('notifications-updated'));
 };
 
-// Получить все уведомления
 export const getNotifications = () => {
   return JSON.parse(localStorage.getItem('app_notifications') || '[]');
 };
 
-// Отметить уведомление как прочитанное
 export const markNotificationRead = (id) => {
   const notifications = getNotifications();
   const updated = notifications.map(n => n.id === id ? { ...n, read: true } : n);
@@ -800,7 +239,6 @@ export const markNotificationRead = (id) => {
   window.dispatchEvent(new Event('notifications-updated'));
 };
 
-// Отметить все как прочитанные
 export const markAllNotificationsRead = () => {
   const notifications = getNotifications();
   const updated = notifications.map(n => ({ ...n, read: true }));
@@ -808,11 +246,11 @@ export const markAllNotificationsRead = () => {
   window.dispatchEvent(new Event('notifications-updated'));
 };
 
-// ===================== ПОЛУЧЕНИЕ УНИКАЛЬНЫХ ОТДЕЛОВ ИЗ ПОЛЬЗОВАТЕЛЕЙ =====================
+// ========== ДЕПАРТАМЕНТЫ ==========
 export const getUniqueDepartments = async () => {
   const users = await getAllUsers();
   const deptMap = new Map();
-  users.forEach(user => {
+  (users || []).forEach(user => {
     if (user.departmentId && !deptMap.has(user.departmentId)) {
       let name = user.departmentId;
       if (user.departmentId === 'dept1') name = 'Логистика';
@@ -824,3 +262,535 @@ export const getUniqueDepartments = async () => {
   });
   return Array.from(deptMap.values());
 };
+
+// ========== РЕСУРСЫ ==========
+export const getResourceSections = async () => {
+  const response = await fetch(`${API_BASE}/resources/sections`);
+  return handleResponse(response);
+};
+
+export const addResourceSection = async (section) => {
+  const response = await fetch(`${API_BASE}/resources/sections`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(section)
+  });
+  return handleResponse(response);
+};
+
+export const getResourceLinks = async (sectionId) => {
+  const params = new URLSearchParams({ sectionId });
+  const response = await fetch(`${API_BASE}/resources/links?${params}`);
+  return handleResponse(response);
+};
+
+export const addResourceLink = async (link) => {
+  const response = await fetch(`${API_BASE}/resources/links`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(link)
+  });
+  return handleResponse(response);
+};
+
+// ========== BLOCK ВНИМАНИЯ ==========
+export const getAttentionBlock = async (userId, departmentId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/attention?${params}`);
+  const data = await handleResponse(response);
+  return data || { overdueTasks: [], todayTasks: [], overdueAssignments: [], todayAssignments: [] };
+};
+
+// ========== ЗАМЕТКИ (notebook) ==========
+export const getNotebook = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/notebook?${params}`);
+  const data = await handleResponse(response);
+  return data || { notes: [] };
+};
+
+export const addNote = async (userId, note) => {
+  const response = await fetch(`${API_BASE}/notebook`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, ...note })
+  });
+  return handleResponse(response);
+};
+
+export const deleteNote = async (userId, noteId) => {
+  const response = await fetch(`${API_BASE}/notebook/${noteId}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+export const updateNote = async (userId, noteId, title, body) => {
+  const response = await fetch(`${API_BASE}/notebook/${noteId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ userId, title, body })
+  });
+  return handleResponse(response);
+};
+
+// ========== ЛОГИСТИКА: водители ==========
+export const getDrivers = async (userId, filters = {}) => {
+  const params = new URLSearchParams({ userId });
+  if (filters.city) params.append('city', filters.city);
+  if (filters.category) params.append('category', filters.category);
+  if (filters.active !== undefined) params.append('active', filters.active ? '1' : '0');
+  if (filters.search) params.append('search', filters.search);
+  const response = await fetch(`${API_BASE}/drivers?${params}`);
+  return handleResponse(response);
+};
+
+export const getAllDrivers = async () => getDrivers('');
+
+export const addDriver = async (driver) => {
+  const response = await fetch(`${API_BASE}/drivers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(driver)
+  });
+  return handleResponse(response);
+};
+
+export const updateDriver = async (id, driver) => {
+  const response = await fetch(`${API_BASE}/drivers/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(driver)
+  });
+  return handleResponse(response);
+};
+
+export const deleteDriver = async (id) => {
+  const response = await fetch(`${API_BASE}/drivers/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== ЛОГИСТИКА: заказчики ==========
+export const getCustomers = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/customers?${params}`);
+  return handleResponse(response);
+};
+
+export const addCustomer = async (customer) => {
+  const response = await fetch(`${API_BASE}/customers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(customer)
+  });
+  return handleResponse(response);
+};
+
+export const deleteCustomer = async (id) => {
+  const response = await fetch(`${API_BASE}/customers/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== ЛОГИСТИКА: выплаты ==========
+export const getPaymentsToDrivers = async (userId, filters = {}) => {
+  const params = new URLSearchParams({ userId });
+  if (filters.driverId) params.append('driverId', filters.driverId);
+  if (filters.startDate) params.append('startDate', filters.startDate);
+  if (filters.endDate) params.append('endDate', filters.endDate);
+  const response = await fetch(`${API_BASE}/payments?${params}`);
+  return handleResponse(response);
+};
+
+export const addPaymentToDriver = async (payment) => {
+  const response = await fetch(`${API_BASE}/payments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payment)
+  });
+  return handleResponse(response);
+};
+
+export const updatePaymentToDriver = async (id, payment) => {
+  const response = await fetch(`${API_BASE}/payments/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payment)
+  });
+  return handleResponse(response);
+};
+
+export const deletePaymentToDriver = async (id) => {
+  const response = await fetch(`${API_BASE}/payments/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== ЛОГИСТИКА: план выплат ==========
+export const getPaymentPlan = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/payment-plan?${params}`);
+  return handleResponse(response);
+};
+
+export const addPaymentPlanItem = async (item) => {
+  const response = await fetch(`${API_BASE}/payment-plan`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item)
+  });
+  return handleResponse(response);
+};
+
+export const updatePaymentPlanItem = async (id, item) => {
+  const response = await fetch(`${API_BASE}/payment-plan/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item)
+  });
+  return handleResponse(response);
+};
+
+export const deletePaymentPlanItem = async (id) => {
+  const response = await fetch(`${API_BASE}/payment-plan/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== ЛОГИСТИКА: предоплаты ==========
+export const setPrepayment = async (prepayment) => {
+  const response = await fetch(`${API_BASE}/prepayments`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(prepayment)
+  });
+  return handleResponse(response);
+};
+
+// ========== ЛОГИСТИКА: фото ==========
+export const getPhotosByDriver = async (driverId) => {
+  const params = new URLSearchParams({ driverId });
+  const response = await fetch(`${API_BASE}/photos?${params}`);
+  return handleResponse(response);
+};
+
+export const addPhoto = async (photo) => {
+  const response = await fetch(`${API_BASE}/photos`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(photo)
+  });
+  return handleResponse(response);
+};
+
+export const deletePhoto = async (id) => {
+  const response = await fetch(`${API_BASE}/photos/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== БРОНИРОВАНИЕ: чек-листы ==========
+export const getChecklists = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/checklists?${params}`);
+  return handleResponse(response);
+};
+
+export const addChecklist = async (checklist) => {
+  const response = await fetch(`${API_BASE}/checklists`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(checklist)
+  });
+  return handleResponse(response);
+};
+
+export const updateChecklist = async (id, checklist) => {
+  const response = await fetch(`${API_BASE}/checklists/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(checklist)
+  });
+  return handleResponse(response);
+};
+
+export const deleteChecklist = async (id) => {
+  const response = await fetch(`${API_BASE}/checklists/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== СТАЖ ==========
+export const getSeniority = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/seniority?${params}`);
+  return handleResponse(response);
+};
+
+// ========== РАЗВИТИЕ ==========
+export const getDevelopmentData = async (userId, departmentId) => {
+  const params = new URLSearchParams({ userId, departmentId });
+  const response = await fetch(`${API_BASE}/development?${params}`);
+  return handleResponse(response);
+};
+
+// ========== ГРАФИК ==========
+export const getShifts = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/shifts?${params}`);
+  return handleResponse(response);
+};
+
+// ========== СМЕНЫ ==========
+export const getShiftRequests = async (userId, departmentId) => {
+  const params = new URLSearchParams({ userId, departmentId });
+  const response = await fetch(`${API_BASE}/shift-requests?${params}`);
+  return handleResponse(response);
+};
+
+export const createShiftRequest = async (request) => {
+  const response = await fetch(`${API_BASE}/shift-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+  return handleResponse(response);
+};
+
+export const updateShiftRequest = async (id, request) => {
+  const response = await fetch(`${API_BASE}/shift-requests/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+  return handleResponse(response);
+};
+
+// ========== ПЕРЕРАБОТКИ ==========
+export const getOvertimeRequests = async (userId, departmentId) => {
+  const params = new URLSearchParams({ userId, departmentId });
+  const response = await fetch(`${API_BASE}/overtime-requests?${params}`);
+  return handleResponse(response);
+};
+
+export const createOvertimeRequest = async (request) => {
+  const response = await fetch(`${API_BASE}/overtime-requests`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+  return handleResponse(response);
+};
+
+export const updateOvertimeRequest = async (id, request) => {
+  const response = await fetch(`${API_BASE}/overtime-requests/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(request)
+  });
+  return handleResponse(response);
+};
+
+// ========== ДОГОВОРЫ ==========
+export const getContracts = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/contracts?${params}`);
+  return handleResponse(response);
+};
+
+export const addContract = async (contract) => {
+  const response = await fetch(`${API_BASE}/contracts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(contract)
+  });
+  return handleResponse(response);
+};
+
+export const updateContract = async (id, contract) => {
+  const response = await fetch(`${API_BASE}/contracts/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(contract)
+  });
+  return handleResponse(response);
+};
+
+export const deleteContract = async (id) => {
+  const response = await fetch(`${API_BASE}/contracts/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+export const getExpiringContracts = async () => {
+  const response = await fetch(`${API_BASE}/contracts/expiring`);
+  return handleResponse(response);
+};
+
+// ========== ОТЧЁТЫ ==========
+export const getReports = async (userId, date) => {
+  const params = new URLSearchParams({ userId, date });
+  const response = await fetch(`${API_BASE}/reports?${params}`);
+  return handleResponse(response);
+};
+
+export const getWeeklyReports = async (userId, startDate) => {
+  const params = new URLSearchParams({ userId, startDate });
+  const response = await fetch(`${API_BASE}/reports/weekly?${params}`);
+  return handleResponse(response);
+};
+
+export const getMonthlyReports = async (userId, month) => {
+  const params = new URLSearchParams({ userId, month });
+  const response = await fetch(`${API_BASE}/reports/monthly?${params}`);
+  return handleResponse(response);
+};
+
+// ========== СЕГОДНЯШНИЕ ЭЛЕМЕНТЫ ==========
+export const getTodayItems = async (userId, departmentId) => {
+  const params = new URLSearchParams({ userId, departmentId });
+  const response = await fetch(`${API_BASE}/today-items?${params}`);
+  return handleResponse(response);
+};
+
+export const addTodayItem = async (item) => {
+  const response = await fetch(`${API_BASE}/today-items`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item)
+  });
+  return handleResponse(response);
+};
+
+export const updateTodayItem = async (id, item) => {
+  const response = await fetch(`${API_BASE}/today-items/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(item)
+  });
+  return handleResponse(response);
+};
+
+export const deleteTodayItem = async (id) => {
+  const response = await fetch(`${API_BASE}/today-items/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+// ========== БАЛЛЫ ПОЛЬЗОВАТЕЛЮ ==========
+export const addPointsToUser = async (targetUserId, points, reason) => {
+  const response = await fetch(`${API_BASE}/users/${targetUserId}/points`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ points, reason })
+  });
+  return handleResponse(response);
+};
+
+// ========== ОТЧЁТЫ: сохранение ==========
+export const saveReport = async (report) => {
+  const response = await fetch(`${API_BASE}/reports/save`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(report)
+  });
+  return handleResponse(response);
+};
+
+// ========== ГРАФИК: месяц, смены ==========
+export const getShiftsByMonth = async (month) => {
+  const params = new URLSearchParams({ month });
+  const response = await fetch(`${API_BASE}/shifts/month?${params}`);
+  return handleResponse(response);
+};
+
+export const setShiftForDate = async (date, shiftData) => {
+  const response = await fetch(`${API_BASE}/shifts/${date}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(shiftData)
+  });
+  return handleResponse(response);
+};
+
+export const getShiftRequestsForManager = async (departmentId) => {
+  const params = new URLSearchParams({ departmentId });
+  const response = await fetch(`${API_BASE}/shift-requests/manager?${params}`);
+  return handleResponse(response);
+};
+
+export const saveShiftsBatch = async (shifts) => {
+  const response = await fetch(`${API_BASE}/shifts/batch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ shifts })
+  });
+  return handleResponse(response);
+};
+
+export const getOvertimeRequestsForManager = async (departmentId) => {
+  const params = new URLSearchParams({ departmentId });
+  const response = await fetch(`${API_BASE}/overtime-requests/manager?${params}`);
+  return handleResponse(response);
+};
+
+export const updateUsersOrder = async (order) => {
+  const response = await fetch(`${API_BASE}/users/order`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ order })
+  });
+  return handleResponse(response);
+};
+
+// Пользователи: админ
+export const createUser = async (user) => {
+  const response = await fetch(`${API_BASE}/users`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(user)
+  });
+  return handleResponse(response);
+};
+
+export const deleteUser = async (id) => {
+  const response = await fetch(`${API_BASE}/users/${id}`, { method: 'DELETE' });
+  return handleResponse(response);
+};
+
+export const updateUser = async (id, user) => {
+  const response = await fetch(`${API_BASE}/users/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(user)
+  });
+  return handleResponse(response);
+};
+
+// Финансы: итоги
+export const getTotalPayments = async (month) => {
+  const params = new URLSearchParams({ month });
+  const response = await fetch(`${API_BASE}/payments/total?${params}`);
+  return handleResponse(response);
+};
+
+export const getTotalPlan = async (month) => {
+  const params = new URLSearchParams({ month });
+  const response = await fetch(`${API_BASE}/payment-plan/total?${params}`);
+  return handleResponse(response);
+};
+
+export const getTotalPrepaymentsAmount = async (month) => {
+  const params = new URLSearchParams({ month });
+  const response = await fetch(`${API_BASE}/prepayments/total?${params}`);
+  return handleResponse(response);
+};
+
+// Предоплаты
+export const getAllPrepayments = async (userId) => {
+  const params = new URLSearchParams({ userId });
+  const response = await fetch(`${API_BASE}/prepayments?${params}`);
+  return handleResponse(response);
+};
+
+export const updatePrepayment = async (id, prepayment) => {
+  const response = await fetch(`${API_BASE}/prepayments/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(prepayment)
+  });
+  return handleResponse(response);
+};
+
+export const db = null;

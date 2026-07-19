@@ -6,7 +6,7 @@ import interactionPlugin from '@fullcalendar/interaction';
 import { getEvents, addEvent, updateEvent, deleteEvent, getTasksAsEvents, addTask, updateTask, deleteTask } from '../services/dataService';
 import LoadingSpinner from './LoadingSpinner';
 
-const Calendar = forwardRef(({ userId, timezone, isAdmin = false }, ref) => {
+const Calendar = forwardRef(({ userId, timezone }, ref) => {
   const [events, setEvents] = useState([]);
   const [showModal, setShowModal] = useState(false);
   const [currentItem, setCurrentItem] = useState(null);
@@ -55,7 +55,7 @@ const Calendar = forwardRef(({ userId, timezone, isAdmin = false }, ref) => {
       const formattedTasks = taskEvents.map(ev => ({
         id: ev.id,
         title: ev.title,
-        start: ev.start,
+        start: ev.dueDate,
         comment: ev.comment,
         status: ev.status,
         type: 'task'

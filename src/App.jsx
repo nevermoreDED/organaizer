@@ -1,5 +1,4 @@
 import { useState, useEffect, useRef } from 'react';
-import Login from './components/Login';
 import AttentionBlock from './components/AttentionBlock';
 import Calendar from './components/Calendar';
 import UpcomingView from './components/UpcomingView';
@@ -15,11 +14,28 @@ import NotesSidebar from './components/NotesSidebar';
 import TodayItemsSidebar from './components/TodayItemsSidebar';
 import LogsViewer from './components/LogsViewer';
 import AdminPanel from './components/AdminPanel';
-import { updateAssignment } from './services/dataService';
+import { updateAssignment } from './services/apiService';
 import './index.css';
 
 function App() {
-  const [currentUser, setCurrentUser] = useState(null);
+  // Получаем пользователя из глобального объекта Bitrix (CRM)
+  const [currentUser, setCurrentUser] = useState(() => {
+    // Проверяем window.BITRIX_USER (установлен в компоненте)
+    if (typeof window !== 'undefined' && window.BITRIX_USER) {
+      return {
+        id: window.BITRIX_USER.ID,
+        fullName: window.BITRIX_USER.NAME || window.BITRIX_USER.fullName,
+        email: window.BITRIX_USER.EMAIL,
+        login: window.BITRIX_USER.LOGIN,
+        isAdmin: window.BITRIX_USER.IS_ADMIN || false,
+        departmentId: window.BITRIX_USER.DEPARTMENT_ID || '',
+        role: window.BITRIX_USER.role || (window.BITRIX_USER.IS_ADMIN ? 'admin' : 'user'),
+        isIT: window.BITRIX_USER.isIT || false
+      };
+    }
+    return null;
+  });
+  
   const [showAdmin, setShowAdmin] = useState(false);
   const [timezone, setTimezone] = useState(localStorage.getItem('timezone') || 'Europe/Moscow');
   const [mainTab, setMainTab] = useState('organizer');
@@ -46,11 +62,32 @@ function App() {
     }
   }, [theme]);
 
-  if (!currentUser) {
-    return <Login onLogin={setCurrentUser} />;
-  }
+  // Слушаем обновления пользователя из Bitrix
+  useEffect(() => {
+    const handleUserUpdate = () => {
+      if (window.BITRIX_USER && !currentUser) {
+        setCurrentUser({
+          id: window.BITRIX_USER.ID,
+          fullName: window.BITRIX_USER.NAME || window.BITRIX_USER.fullName,
+          email: window.BITRIX_USER.EMAIL,
+          login: window.BITRIX_USER.LOGIN,
+          isAdmin: window.BITRIX_USER.IS_ADMIN || false,
+          departmentId: window.BITRIX_USER.DEPARTMENT_ID || '',
+          role: window.BITRIX_USER.role || (window.BITRIX_USER.IS_ADMIN ? 'admin' : 'user'),
+          isIT: window.BITRIX_USER.isIT || false
+        });
+      }
+    };
+    
+    window.addEventListener('bitrix-user-updated', handleUserUpdate);
+    return () => window.removeEventListener('bitrix-user-updated', handleUserUpdate);
+  }, [currentUser]);
 
-  const isAdmin = currentUser.role === 'admin' || currentUser.isIT === true;
+  const handleLogout = () => {
+    window.location.href = '/?logout=yes';
+  };
+
+  const isAdmin = currentUser?.role === 'admin' || currentUser?.isIT === true;
 
   const toggleTheme = () => {
     setTheme(prev => prev === 'dark' ? 'light' : 'dark');
@@ -82,6 +119,24 @@ function App() {
       console.error('Ошибка сохранения поручения:', err);
     }
   };
+
+  if (!currentUser) {
+    return (
+      <div style={{ 
+        display: 'flex', 
+        justifyContent: 'center', 
+        alignItems: 'center', 
+        height: '100vh',
+        background: '#1a1a2e',
+        color: '#fff'
+      }}>
+        <div style={{ textAlign: 'center' }}>
+          <h2>Загрузка...</h2>
+          <p>Получение данных пользователя из CRM</p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <>
@@ -140,7 +195,7 @@ function App() {
             <button className={`nav-button ${mainTab === 'schedule' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('schedule')}>График</button>
             {isAdmin && <button className="danger" onClick={() => setShowAdmin(true)}>👑 Админ-панель</button>}
             {isAdmin && <button className={`nav-button ${mainTab === 'logs' ? 'primary' : 'secondary'}`} onClick={() => setMainTab('logs')}>Логи</button>}
-            <button className="secondary" onClick={() => setCurrentUser(null)}>Выйти</button>
+            <button className="secondary" onClick={handleLogout}>Выйти</button>
           </div>
         </header>
 
